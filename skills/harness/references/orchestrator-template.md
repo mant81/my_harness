@@ -5,6 +5,9 @@
 - **템플릿 A: 에이전트 팀 모드 (기본)** — 2명 이상 협업 시 최우선 선택
 - **템플릿 B: 서브 에이전트 모드 (대안)** — 팀 통신이 불필요한 경우
 - **템플릿 C: 하이브리드 모드** — Phase마다 모드를 섞어 구성
+- **템플릿 D: Codex 런타임 어댑터** — Codex CLI에서 실행 시(팀 도구 부재). A/B를 순차·subprocess로 매핑
+
+> 듀얼 런타임(Claude Code + Codex) 설계 전반은 `references/runtime-adapters.md` 참조. 오케스트레이터 상단에 "런타임 감지 후 분기" 한 줄을 넣고, 팀 도구 가용 시 A, 부재 시 D를 따른다.
 
 ---
 
@@ -264,9 +267,53 @@ description: "{도메인} 오케스트레이터 (하이브리드). {키워드}. 
 
 ---
 
+---
+
+## 템플릿 D: Codex 런타임 어댑터
+
+Codex엔 `TeamCreate`/`SendMessage`는 없지만 **네이티브 subagents**(내장 `default`/`worker`/`explorer` + 커스텀 `.codex/agents/*.toml`)가 있다. 정본 스킬(`.agents/skills/`, SKILL.md 동일 포맷)은 공유하고, **조율 도구만** 매핑한다. (검증: 공식 Codex docs + 0.137.0)
+
+```markdown
+## 실행 모드: Codex 어댑터 (런타임 감지 후 분기)
+
+> 팀 도구(TeamCreate 등) 가용 시 템플릿 A. 부재 시(=Codex) 아래.
+
+### 매핑 규칙
+| 팀 모드(A) | Codex 어댑터(D) |
+|-----------|----------------|
+| TeamCreate(members) | Codex subagents 병렬 spawn(`.codex/agents/*.toml` 또는 내장 worker/explorer), `/agent`로 전환 |
+| TaskCreate/depends_on | 단계 순서 실행(의존 = 선행 단계 산출물 파일 존재 확인) |
+| SendMessage(팀원 통신) | `_workspace/` 파일로 전달 — 다음 단계가 Read |
+| 완전 독립 병렬(CI 등) | `codex exec` subprocess 백그라운드 |
+
+### Phase 2: 실행
+subagents 병렬 또는 순차. 각 산출물 `_workspace/{phase}_{agent}_{artifact}.md` 저장 → 다음 단계가 Read로 입력(메시지 대신 파일).
+
+### codex exec subprocess (독립 병렬·CI)
+```bash
+mkdir -p _workspace
+# stdin 폐쇄 필수(< /dev/null) — 안 하면 codex exec 무한 대기
+codex exec --sandbox read-only --json -o _workspace/{phase}_{agent}.md \
+  "$(cat _workspace/{agent}_prompt.md)" < /dev/null &
+wait   # 여러 개 띄운 뒤
+```
+- 베스트 프랙티스(검증): 기본 `read-only` / 쓰기만 `--sandbox workspace-write` / 스크립트 소비 `--json` / 최종 메시지만 `-o`(`--output-last-message`) / 격리 `--ignore-user-config`.
+- 외부 리뷰 게이트(external-review-loop)는 양쪽 동일 — 이미 subprocess.
+
+### 에러 핸들링
+- 실패 작업 1회 재시도 → 누락 명시 후 진행. 산출물 충돌: 출처 병기, 삭제 금지(A와 동일).
+
+### 데이터 흐름
+[오케스트레이터] → subagents/순차/codex exec → `_workspace/*.md` → Read 통합 → 최종 산출물
+```
+
+> Codex 진입점(AGENTS.md)·스킬 경로(`.agents/skills/`)·설치·한계는 `references/runtime-adapters.md`.
+
+---
+
 ## 작성 원칙
 
-1. **실행 모드를 먼저 명시** — 오케스트레이터 상단에 "에이전트 팀" / "서브 에이전트" / "하이브리드" 중 하나 명시. 하이브리드면 Phase별 모드 표 필수
+1. **실행 모드를 먼저 명시** — 오케스트레이터 상단에 "에이전트 팀" / "서브 에이전트" / "하이브리드" / "Codex 어댑터" 중 하나 명시. 듀얼 런타임이면 "런타임 감지 후 A 또는 D" 명시. 하이브리드면 Phase별 모드 표 필수
 2. **팀 모드는 TeamCreate/SendMessage/TaskCreate 사용법을 구체적으로** — 팀 구성, 작업 등록, 통신 규칙
 3. **서브 모드는 Agent 도구 파라미터를 완전히 명시** — name, subagent_type, prompt, run_in_background, model
 4. **파일 경로는 절대적으로** — 상대 경로 금지, `_workspace/` 기준 명확한 경로

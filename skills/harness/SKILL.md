@@ -15,6 +15,7 @@ description: "하네스를 구성합니다. 전문 에이전트를 정의하며,
 5. **품질 게이트 2층 (코드/설계 도메인).** *내부* 생성-검증(같은 세션 QA)과 *외부* 리뷰 루프(codex/gemini 독립 검증)를 병행한다. 같은 컨텍스트 QA는 같은 맹점을 공유하므로 외부 독립 관점이 추가 결함을 잡는다. 단 합의=정답 아님 — 판정 권위는 오케스트레이터. 상세: `references/external-review-loop.md`.
 6. **생성물에 교리 주입.** 빌더·수정·QA 에이전트의 작업 원칙에 개발 규칙·TDD 교리를 **타겟상대 실경로**로 주입한다(`[[ ]]`·플러그인 내부 경로 금지 — 서브에이전트가 해소 못 함). 상세: `references/dev-rules.md`, `references/tdd-doctrine.md`.
 7. **리스크 등급으로 게이트 강도 조절.** 무차별 게이트는 과의식이다. 단계마다 경량/표준/중대 등급을 정해 게이트 강도를 맞춘다 (Phase 5-6).
+8. **듀얼 런타임 (Claude Code + Codex).** 두 런타임 거의 대칭(둘 다 skills·agents·MCP·hooks). SKILL.md 포맷 동일이라 정본 공유, 어댑터로 분기할 것만: 진입점(plugin.json+CLAUDE.md / AGENTS.md), 스킬 경로(`.claude/skills/` / `.agents/skills/`), 에이전트(`.md` / `.codex/agents/*.toml`), 오케스트레이션(TeamCreate / Codex subagents·subprocess). 생성 시 양쪽 출력. 상세·검증: `references/runtime-adapters.md`.
 
 ## 워크플로우
 
@@ -293,6 +294,8 @@ Phase마다 다른 모드를 섞어 구성한다. 자주 쓰이는 조합:
 | {YYYY-MM-DD} | 초기 구성 | 전체 | - |
 ````
 
+**듀얼 런타임 포인터:** Codex용으로 레포 루트 `AGENTS.md`에도 같은 포인터 + Codex 오케스트레이션 어댑터(subagents/subprocess) 주석을 출력한다(Codex 자동 로드). 둘 다 같은 정본을 가리킴. 한쪽만 갱신=drift. 상세: `references/runtime-adapters.md`.
+
 **CLAUDE.md에 넣지 않는 것:** 에이전트 목록, 스킬 목록, 디렉토리 구조, 실행 규칙 상세. 이유: 에이전트/스킬 목록은 오케스트레이터 스킬과 `.claude/agents/`, `.claude/skills/`에서 관리하므로 중복이다. 디렉토리 구조는 파일 시스템에서 직접 확인 가능하다. CLAUDE.md는 **포인터(트리거 규칙) + 변경 이력**만 담는다.
 
 #### 5-5. 후속 작업 지원
@@ -466,26 +469,23 @@ Phase마다 다른 모드를 섞어 구성한다. 자주 쓰이는 조합:
 
 생성 완료 후 확인:
 
-- [ ] `프로젝트/.claude/agents/` — **에이전트 정의 파일 필수 생성** (빌트인 타입이라도 파일 생성 필수)
-- [ ] `프로젝트/.claude/skills/` — 스킬 파일들 (SKILL.md + references/)
+- [ ] `.claude/agents/`(정의 파일, 빌트인 타입도 필수) + `.claude/skills/`(SKILL.md + references/) 생성
 - [ ] 오케스트레이터 스킬 1개 (데이터 흐름 + 에러 핸들링 + 테스트 시나리오 포함)
 - [ ] 실행 모드 명시 (에이전트 팀 / 서브 에이전트 / 하이브리드 중 선택, 하이브리드면 Phase별 모드 기재)
 - [ ] 모든 Agent 호출에 `model: "opus"` 파라미터 명시
-- [ ] 신규 에이전트 생성 전 기존 에이전트 중복 검토 완료 (Phase 3-0)
-- [ ] 신규 스킬 생성 전 기존 스킬 중복 검토 완료 (Phase 4-0)
+- [ ] 신규 에이전트·스킬 생성 전 기존 중복 검토 완료 (Phase 3-0, 4-0)
 - [ ] `.claude/commands/` — 아무것도 생성하지 않음
 - [ ] 기존 에이전트/스킬과 충돌 없음
 - [ ] 스킬 description이 적극적("pushy")으로 작성됨 — **후속 작업 키워드 포함**
 - [ ] SKILL.md 본문이 500줄 이내, 초과 시 references/ 분리
-- [ ] 테스트 프롬프트 2~3개로 실행 검증 완료
-- [ ] 트리거 검증 (should-trigger + should-NOT-trigger) 완료
-- [ ] **CLAUDE.md에 하네스 포인터 등록** (트리거 규칙 + 변경 이력)
-- [ ] **CLAUDE.md 변경 이력에 에이전트/스킬 추가/삭제/수정 기록**
+- [ ] 테스트 프롬프트 2~3개 실행 검증 + 트리거 검증(should/should-NOT) 완료
+- [ ] **CLAUDE.md 포인터 등록 + 변경 이력에 에이전트/스킬 추가·삭제·수정 기록**
 - [ ] **오케스트레이터 Phase 1에 컨텍스트 확인 단계** (초기/후속/부분 재실행 판별)
 - [ ] (코드/설계) 코드/수정 에이전트에 dev-rules·tdd-doctrine **타겟상대 실경로** 주입 (`[[ ]]` 금지) + 교리 파일 타겟 복사 (Phase 3-1)
 - [ ] (코드/설계) **codex/gemini 연동 점검**(`check-review-tools.sh`) 후 `external-review-loop` 스킬 생성 — 도구 전무면 생략(불필요 스킬 방지) + 단계 게이트 배선, 단계마다 리스크 등급 판정 (Phase 4-6, 5-6)
 - [ ] (코드/설계) 커밋 순서·자율 노브(`_workspace/.autonomous`)·push 별도 게이트 반영
 - [ ] 결과서에 `## 다음 단계 참조` 블록 (연속성)
+- [ ] **듀얼 런타임:** 루트 `AGENTS.md` + 스킬 `.agents/skills/` 출력, 오케스트레이터에 어댑터(TeamCreate / Codex subagents·subprocess) 명시 (`references/runtime-adapters.md`)
 
 ## 참고
 
@@ -496,5 +496,5 @@ Phase마다 다른 모드를 섞어 구성한다. 자주 쓰이는 조합:
 - **스킬 테스트 가이드**: `references/skill-testing-guide.md` — 테스트/평가/반복 개선 방법론
 - **QA 에이전트 가이드**: `references/qa-agent-guide.md` — 빌드 하네스에 QA 에이전트를 포함할 때 참조. 통합 정합성 검증 방법론, 경계면 버그 패턴, QA 에이전트 정의 템플릿 포함. 실제 프로젝트에서 발견된 7개 버그 사례 기반.
 - **외부 리뷰 루프**: `references/external-review-loop.md` — 코드/설계 도메인 하네스에 codex/gemini 독립 검증 단계 게이트를 넣을 때 참조. 방법론 겸 생성 템플릿. 전건 판정·기각 사유표·커밋 순서·자율 노브 포함.
-- **TDD 교리**: `references/tdd-doctrine.md` — 코드 에이전트 작업 원칙 주입용(Red→Green→Refactor, Tidy First).
-- **개발 규칙**: `references/dev-rules.md` — 코드/수정 에이전트 작업 원칙 주입용(사고 우선·단순성·외과적 변경·목표 주도).
+- **TDD 교리 / 개발 규칙**: `references/tdd-doctrine.md`, `references/dev-rules.md` — 코드/수정 에이전트 작업 원칙 주입용.
+- **런타임 어댑터**: `references/runtime-adapters.md` — Claude Code/Codex 듀얼 런타임 설계. 진입점·오케스트레이션 매핑, AGENTS.md·`.agents/skills/` 생성, 설치(Codex 공식 docs 검증).

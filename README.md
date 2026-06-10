@@ -57,7 +57,23 @@ Harness lives at the **L3 Meta-Factory** layer of the Claude Code ecosystem — 
 - **Skill Generation** — Auto-generates skills with Progressive Disclosure for efficient context management
 - **Orchestration** — Inter-agent data passing, error handling, and team coordination protocols
 - **Validation** — Trigger verification, dry-run testing, and with-skill vs without-skill comparison tests
+- **Two-Layer Quality Gate** — Internal Producer-Reviewer QA **plus** an external independent review loop (`external-review-loop`): codex/gemini CLIs review each stage's deliverable, the orchestrator adjudicates every issue against real code (confirm/partial/defer/reject), and only confirmed issues are fixed via TDD. Tool availability is checked first (`check-review-tools.sh`) so the skill is skipped when codex/gemini are absent.
+- **Doctrine Injection** — Generated code/modification agents get TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine injected by real path, with risk-tiered gate strength (light / standard / critical).
+- **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/harness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`). See `references/runtime-adapters.md`.
 
+
+## Philosophy — Skill ↔ Agent
+
+A generated harness separates **who** from **how**, and treats itself as an evolving system:
+
+- **Separation of concerns** — an *agent* is the "who" (expert persona + working principles), a *skill* is the "how" (procedure + bundled tools). Both are files (`.claude/agents/*.md`, `skills/*/SKILL.md`), never inline — reusable across sessions. One agent = one focused role; one agent uses 1–N skills (sharing allowed).
+- **Agent teams by default** — 2+ collaborators self-coordinate via messages, a shared task list, and files under `_workspace/`. Discovery-sharing, conflict debate, and gap-filling raise quality.
+- **Two-layer quality gate** — internal Producer-Reviewer QA **plus** an external independent review loop (codex/gemini). The orchestrator adjudicates every issue against real code — consensus is not proof. Gate strength is risk-tiered (light / standard / critical).
+- **Doctrine injection** — code/modification agents receive TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine by real path (subagents don't inherit global rules).
+- **Why over command, DRY pointers** — principles explain *why* (so agents judge edge cases) and reference a single source instead of duplicating it.
+- **Evolving system** — feedback routes to the right layer (output → skill, role → agent, order → orchestrator, trigger → description) and is logged for regression safety.
+
+> In short: the **orchestrator** decides who/when/order, **agents** are the *who*, **skills** are the *how*, and a two-layer gate keeps quality honest.
 
 ## Workflow
 
@@ -70,9 +86,11 @@ Phase 3: Agent Definition Generation (.claude/agents/)
     ↓
 Phase 4: Skill Generation (.claude/skills/)
     ↓
-Phase 5: Integration & Orchestration
+Phase 5: Integration & Orchestration (+ two-layer quality gate, dual-runtime output)
     ↓
 Phase 6: Validation & Testing
+    ↓
+Phase 7: Harness Evolution (feedback → continuous update)
 ```
 
 ## Installation
@@ -96,6 +114,19 @@ Phase 6: Validation & Testing
 cp -r skills/harness ~/.claude/skills/harness
 ```
 
+### Codex CLI (Dual Runtime)
+
+Codex discovers skills from `~/.codex/skills/` (user-global) — and skills load even in untrusted projects. The repo's `install.sh` symlinks the live factory and verifies review tools:
+
+```shell
+bash install.sh
+# → ~/.codex/skills/harness → skills/harness (symlink, always latest)
+# → repo .agents/skills/harness (for trusted projects)
+# → AGENTS.md (auto-loaded by Codex)
+```
+
+Invoke in Codex with **`$harness`**, the **`/skills`** menu, or a description-matching request (e.g. "하네스 구성해줘"). Note: `/harness` is **not** valid Codex syntax (custom slash commands are unsupported); restart the Codex session after install so the skill list reloads.
+
 ## Plugin Structure
 
 ```
@@ -104,14 +135,22 @@ harness/
 │   └── plugin.json                 # Plugin manifest
 ├── skills/
 │   └── harness/
-│       ├── SKILL.md                # Main skill definition (6-Phase workflow)
-│       └── references/
-│           ├── agent-design-patterns.md   # 6 architectural patterns
-│           ├── orchestrator-template.md   # Team/subagent orchestrator templates
-│           ├── team-examples.md           # 5 real-world team configurations
-│           ├── skill-writing-guide.md     # Skill authoring guide
-│           ├── skill-testing-guide.md     # Testing & evaluation methodology
-│           └── qa-agent-guide.md          # QA agent integration guide
+│       ├── SKILL.md                # Main skill definition (7-Phase workflow)
+│       ├── references/
+│       │   ├── agent-design-patterns.md   # 6 architectural patterns
+│       │   ├── orchestrator-template.md   # Team/subagent/Codex orchestrator templates
+│       │   ├── team-examples.md           # Real-world team configurations
+│       │   ├── skill-writing-guide.md     # Skill authoring guide
+│       │   ├── skill-testing-guide.md     # Testing & evaluation methodology
+│       │   ├── qa-agent-guide.md          # QA agent integration guide
+│       │   ├── external-review-loop.md    # codex/gemini external review gate (method + template)
+│       │   ├── tdd-doctrine.md            # TDD doctrine (injected into code agents)
+│       │   ├── dev-rules.md               # Development rules (injected into code agents)
+│       │   └── runtime-adapters.md        # Claude Code / Codex dual-runtime design
+│       └── scripts/
+│           └── check-review-tools.sh      # codex/gemini availability check
+├── AGENTS.md                       # Codex runtime entry point
+├── install.sh                      # Dual-runtime installer (Claude + Codex)
 └── README.md
 ```
 

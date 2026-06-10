@@ -46,6 +46,22 @@ Harness は Claude Code エコシステムの **L3 Meta-Factory** 層 — 他の
 - **スキル生成** — Progressive Disclosureパターンによるコンテキストの効率的管理を備えたスキルを自動生成
 - **オーケストレーション** — エージェント間のデータ受け渡し、エラーハンドリング、チーム連携プロトコルを内蔵
 - **検証体制** — トリガー検証、ドライランテスト、With-skill vs Without-skill 比較テスト
+- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：codex/gemini CLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。先にツール連携を点検（`check-review-tools.sh`）し、codex/geminiが無ければスキルを生成しない。
+- **ドクトリン注入** — 生成されたコード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入。リスク等級（軽量/標準/重大）でゲート強度を調整。
+- **デュアルランタイム（Claude Code + Codex）** — 単一の出典（`skills/harness/`）＋ランタイム別の薄いアダプター。ファクトリーが `CLAUDE.md`・`AGENTS.md` ポインターを両方出力し、オーケストレーションを分岐（Claude `TeamCreate` ↔ Codex ネイティブ subagents / `codex exec`）。詳細：`references/runtime-adapters.md`。
+
+## 哲学 — スキル ↔ エージェント
+
+生成されたハーネスは **誰が** と **どうやって** を分離し、自身を進化するシステムとして扱う：
+
+- **関心の分離** — *エージェント*は「誰が」（専門家ペルソナ＋作業原則）、*スキル*は「どうやって」（手順＋ツール）。いずれもファイル（`.claude/agents/*.md`、`skills/*/SKILL.md`）でインライン禁止 → セッション横断で再利用。1エージェント＝1つの集中した役割、1エージェント↔1〜Nスキル（共有可）。
+- **エージェントチームが既定** — 2名以上はメッセージ・共有タスクリスト・`_workspace/` ファイルで自己調整。発見の共有・対立の議論・抜け漏れ補完が品質を高める。
+- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **＋** 外部独立レビューループ（codex/gemini）。オーケストレーターが全課題を実コードと照合して判定 — 合意は証拠ではない。リスク等級（軽量/標準/重大）で強度を調整。
+- **ドクトリン注入** — コード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入（サブエージェントはグローバル規則を継承しない）。
+- **強制ではなくWhy、DRYなポインター** — 原則は*理由*を説明し（エッジケースの判断）、単一の出典を参照（複製禁止）。
+- **進化するシステム** — フィードバックを適切な層へ（成果物→スキル、役割→エージェント、順序→オーケストレーター、トリガー→description）ルーティングし、退行防止のため履歴を記録。
+
+> 要約：**オーケストレーター**が誰が/いつ/順序を決め、**エージェント**が「誰が」、**スキル**が「どうやって」、2層ゲートが品質を誠実に保つ。
 
 ## ハーネス進化メカニズム (Harness Evolution Mechanism)
 
@@ -73,9 +89,11 @@ Phase 3: エージェント定義の生成（.claude/agents/）
     ↓
 Phase 4: スキル生成（.claude/skills/）
     ↓
-Phase 5: 統合とオーケストレーション
+Phase 5: 統合とオーケストレーション（+ 2層品質ゲート、デュアルランタイム出力）
     ↓
 Phase 6: 検証とテスト
+    ↓
+Phase 7: ハーネス進化（フィードバック → 継続更新）
 ```
 
 ## インストール
@@ -99,6 +117,19 @@ Phase 6: 検証とテスト
 cp -r skills/harness ~/.claude/skills/harness
 ```
 
+### Codex CLI（デュアルランタイム）
+
+Codex は `~/.codex/skills/`（ユーザーグローバル）からスキルを検出し、untrusted プロジェクトでもスキルはロードされます。リポジトリの `install.sh` がライブのファクトリーをシンボリックリンクし、レビューツールを点検します：
+
+```shell
+bash install.sh
+# → ~/.codex/skills/harness → skills/harness（シンボリックリンク、常に最新）
+# → repo .agents/skills/harness（trusted プロジェクト用）
+# → AGENTS.md（Codex が自動ロード）
+```
+
+Codex では **`$harness`**、**`/skills`** メニュー、または description に合致する依頼（例：「ハーネスを構成して」）で呼び出します。`/harness` は Codex の構文では **ありません**（カスタムスラッシュ未対応）。インストール後はスキル一覧の再読み込みのため Codex セッションを再起動してください。
+
 ## プラグイン構成
 
 ```
@@ -107,14 +138,22 @@ harness/
 │   └── plugin.json                 # プラグインマニフェスト
 ├── skills/
 │   └── harness/
-│       ├── SKILL.md                # メインスキル定義（6フェーズワークフロー）
-│       └── references/
-│           ├── agent-design-patterns.md   # 6種のアーキテクチャパターン
-│           ├── orchestrator-template.md   # チーム/サブエージェント オーケストレーターテンプレート
-│           ├── team-examples.md           # 実践チーム構成例 5種
-│           ├── skill-writing-guide.md     # スキル作成ガイド
-│           ├── skill-testing-guide.md     # テスト・評価方法論
-│           └── qa-agent-guide.md          # QAエージェント統合ガイド
+│       ├── SKILL.md                # メインスキル定義（7フェーズワークフロー）
+│       ├── references/
+│       │   ├── agent-design-patterns.md   # 6種のアーキテクチャパターン
+│       │   ├── orchestrator-template.md   # チーム/サブ/Codex オーケストレーターテンプレート
+│       │   ├── team-examples.md           # 実践チーム構成例
+│       │   ├── skill-writing-guide.md     # スキル作成ガイド
+│       │   ├── skill-testing-guide.md     # テスト・評価方法論
+│       │   ├── qa-agent-guide.md          # QAエージェント統合ガイド
+│       │   ├── external-review-loop.md    # codex/gemini 外部レビューゲート（方法論＋テンプレート）
+│       │   ├── tdd-doctrine.md            # TDDドクトリン（コードエージェント注入用）
+│       │   ├── dev-rules.md               # 開発ルール（コードエージェント注入用）
+│       │   └── runtime-adapters.md        # Claude Code / Codex デュアルランタイム設計
+│       └── scripts/
+│           └── check-review-tools.sh      # codex/gemini 連携チェック
+├── AGENTS.md                       # Codex ランタイムのエントリポイント
+├── install.sh                      # デュアルランタイムインストーラー（Claude + Codex）
 └── README.md
 ```
 
