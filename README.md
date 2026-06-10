@@ -62,6 +62,19 @@ Harness lives at the **L3 Meta-Factory** layer of the Claude Code ecosystem — 
 - **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/harness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`). See `references/runtime-adapters.md`.
 
 
+## Philosophy — Skill ↔ Agent
+
+A generated harness separates **who** from **how**, and treats itself as an evolving system:
+
+- **Separation of concerns** — an *agent* is the "who" (expert persona + working principles), a *skill* is the "how" (procedure + bundled tools). Both are files (`.claude/agents/*.md`, `skills/*/SKILL.md`), never inline — reusable across sessions. One agent = one focused role; one agent uses 1–N skills (sharing allowed).
+- **Agent teams by default** — 2+ collaborators self-coordinate via messages, a shared task list, and files under `_workspace/`. Discovery-sharing, conflict debate, and gap-filling raise quality.
+- **Two-layer quality gate** — internal Producer-Reviewer QA **plus** an external independent review loop (codex/gemini). The orchestrator adjudicates every issue against real code — consensus is not proof. Gate strength is risk-tiered (light / standard / critical).
+- **Doctrine injection** — code/modification agents receive TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine by real path (subagents don't inherit global rules).
+- **Why over command, DRY pointers** — principles explain *why* (so agents judge edge cases) and reference a single source instead of duplicating it.
+- **Evolving system** — feedback routes to the right layer (output → skill, role → agent, order → orchestrator, trigger → description) and is logged for regression safety.
+
+> In short: the **orchestrator** decides who/when/order, **agents** are the *who*, **skills** are the *how*, and a two-layer gate keeps quality honest.
+
 ## Workflow
 
 ```
