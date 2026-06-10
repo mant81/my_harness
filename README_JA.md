@@ -286,22 +286,6 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 
 **[revfactory/harness-100](https://github.com/revfactory/harness-100)** — 10ドメイン、100のプロダクションレディなエージェントチームハーネス（英韓200パッケージ）。各ハーネスには4〜5名の専門エージェント、オーケストレータースキル、ドメイン特化スキルが含まれており、すべて本プラグインで生成されました。コンテンツ制作、ソフトウェア開発、データ/AI、ビジネス戦略、教育、法律、ヘルスケアなど1,808のMarkdownファイル。
 
-### 研究：Harness適用前後のA/Bテスト
-
-**[revfactory/claude-code-harness](https://github.com/revfactory/claude-code-harness)** — 15のソフトウェアエンジニアリング課題を対象とした統制実験で、構造化された事前設定がLLMコードエージェントの出力品質に与える影響を測定しました。
-
-| 指標 | Harness未適用 | Harness適用 | 改善 |
-|------|:-:|:-:|:-:|
-| 平均品質スコア | 49.5 | 79.3 | **+60%** |
-| 勝率 | — | — | **100%** (15/15) |
-| 出力分散 | — | — | **-32%** |
-
-主な発見：課題の難易度が高いほど改善効果が増大（Basic +23.8、Advanced +29.6、Expert +36.2）。
-
-**あらゆる場面でこの文をそのままお使いください:** 平均品質 +60% (49.5 → 79.3)、15/15 勝率、出力分散 −32% (n=15、著者測定 A/B、第三者再現実験は進行中)。
-
-> 論文全文：*Hwang, M. (2026). Harness: Structured Pre-Configuration for Enhancing LLM Code Agent Output Quality.*
-
 ## 要件
 
 - [Agent Teams機能の有効化](https://code.claude.com/docs/en/agent-teams)：`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`

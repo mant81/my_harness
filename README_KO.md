@@ -279,22 +279,6 @@ Harness는 Claude Code / 에이전트 프레임워크 생태계에서 혼자가 
 
 **[revfactory/harness-100](https://github.com/revfactory/harness-100)** — 10개 도메인, 100개의 프로덕션 레디 에이전트 팀 하네스 (한영 200패키지). 각 하네스에 4-5명의 전문 에이전트, 오케스트레이터 스킬, 도메인 특화 스킬이 포함되어 있으며, 모두 이 플러그인으로 생성되었습니다. 콘텐츠 제작, 소프트웨어 개발, 데이터/AI, 비즈니스 전략, 교육, 법률, 헬스케어 등 1,808개 마크다운 파일.
 
-### 연구: Harness 적용 전후 A/B 테스트
-
-**[revfactory/claude-code-harness](https://github.com/revfactory/claude-code-harness)** — 15개 소프트웨어 엔지니어링 과제에 대한 통제 실험으로, 구조화된 사전 설정이 LLM 코드 에이전트 출력 품질에 미치는 영향을 측정했습니다.
-
-| 지표 | Harness 미적용 | Harness 적용 | 개선 |
-|------|:-:|:-:|:-:|
-| 평균 품질 점수 | 49.5 | 79.3 | **+60%** |
-| 승률 | — | — | **100%** (15/15) |
-| 출력 분산 | — | — | **-32%** |
-
-핵심 발견: 과제 난이도가 높을수록 개선 효과가 증대 (Basic +23.8, Advanced +29.6, Expert +36.2).
-
-**어디에서나 이 문장을 그대로 사용하세요:** 평균 품질 +60% (49.5 → 79.3), 15/15 승률, 출력 분산 −32% (n=15, 저자 자체 측정 A/B, 제3자 재현 실험 진행 중).
-
-> 논문 전문: *Hwang, M. (2026). Harness: Structured Pre-Configuration for Enhancing LLM Code Agent Output Quality.*
-
 ## 요구사항
 
 - [에이전트 팀 기능 활성화](https://code.claude.com/docs/en/agent-teams): `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
