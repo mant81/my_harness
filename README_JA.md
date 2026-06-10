@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.2.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.0-brightgreen.svg" alt="Version">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Patterns-6_Architectures-orange.svg" alt="6 Architecture Patterns">
@@ -309,17 +309,7 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 ## FAQ
 
 <details>
-<summary><b>Q1. "+60%" は誇張では？</b></summary>
-
-**A.** +60% は **著者自身による A/B（n=15、15 タスク、姉妹リポジトリ `claude-code-harness` で計測）** の結果です。本リポジトリでは、この数値を引用する際は必ず「n=15、著者測定、第三者再現実験は進行中」を同じ文の中に併記しています。組織導入時には、2〜4 週間の社内パイロットで独自の数値を測定することを推奨します。
-
-**Evidence:**
-- 著者 A/B: [revfactory/claude-code-harness](https://github.com/revfactory/claude-code-harness)
-- 論文: *Hwang, M. (2026). Harness: Structured Pre-Configuration for Enhancing LLM Code Agent Output Quality*
-</details>
-
-<details>
-<summary><b>Q2. なぜ "harness builder" ではなく "harness factory" なのですか？ Archon と競合しませんか？</b></summary>
+<summary><b>Q1. なぜ "harness builder" ではなく "harness factory" なのですか？ Archon と競合しませんか？</b></summary>
 
 **A.** Archon は決定的なランタイム構成を生成する **Runtime-Configuration Factory** であり、Harness はエージェントチームアーキテクチャ（チーム構造・メッセージプロトコル・レビューゲート）を生成する **Team-Architecture Factory** です。両者は **同じ L3 Meta-Factory 層の隣接するサブ層** で、用途が異なります。決定的なランタイムが必要なら Archon、6 つのチームアーキテクチャパターンの事前定義が必要なら Harness。両者を組み合わせる（アーキテクチャ設計 → ランタイム配置）ことも可能です。
 
@@ -330,7 +320,7 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 </details>
 
 <details>
-<summary><b>Q3. 「Claude Code 専用」は狭すぎませんか？ Gemini・Codex は？</b></summary>
+<summary><b>Q2. 「Claude Code 専用」は狭すぎませんか？ Gemini・Codex は？</b></summary>
 
 **A.** 現時点で公式のランタイムは Claude Code のみです。同一コンセプトの Codex 移植 [SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness) がすでに公開されており、既存の Codex チームはそちらから開始できます。Harness は「Claude Code ネイティブ・深く」を選択しており、クロスランタイムの需要は共存リポジトリ（meta-harness、harness-init、OpenRig）との連携計画としてロードマップに反映される予定です。
 

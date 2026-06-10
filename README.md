@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.2.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-1.0.0-brightgreen.svg" alt="Version">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Patterns-6_Architectures-orange.svg" alt="6 Architecture Patterns">
@@ -295,17 +295,7 @@ Key finding: effectiveness scales with task complexity — the harder the task, 
 ## FAQ
 
 <details>
-<summary><b>Q1. Isn't "+60%" oversold?</b></summary>
-
-**A.** The +60% figure comes from an **author-measured A/B (n=15, 15 tasks, measured on the sister repo `claude-code-harness`)**. Every citation in this repo pairs the number with the disclosure "n=15, author-measured, third-party replications pending" in the same sentence. For adoption decisions, we recommend running a 2–4 week internal pilot and measuring your own numbers.
-
-**Evidence:**
-- Author A/B: [revfactory/claude-code-harness](https://github.com/revfactory/claude-code-harness)
-- Paper: *Hwang, M. (2026). Harness: Structured Pre-Configuration for Enhancing LLM Code Agent Output Quality*
-</details>
-
-<details>
-<summary><b>Q2. Why "harness factory" and not "harness builder"? Isn't this competing with Archon?</b></summary>
+<summary><b>Q1. Why "harness factory" and not "harness builder"? Isn't this competing with Archon?</b></summary>
 
 **A.** Archon generates deterministic runtime configurations — it's a **Runtime-Configuration Factory**. Harness generates agent team architectures (team structure, message protocols, review gates) — it's a **Team-Architecture Factory**. They are **neighbor sub-layers of the same L3 Meta-Factory** and serve different needs. Pick Archon for runtime determinism, Harness for team-architecture patterns, or combine them (design architecture with Harness → deploy runtime with Archon).
 
@@ -316,7 +306,7 @@ Key finding: effectiveness scales with task complexity — the harder the task, 
 </details>
 
 <details>
-<summary><b>Q3. Isn't "Claude Code only" too narrow? What about Gemini/Codex?</b></summary>
+<summary><b>Q2. Isn't "Claude Code only" too narrow? What about Gemini/Codex?</b></summary>
 
 **A.** Currently the official runtime is Claude Code only. A Codex port of the same concept — [SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness) — is already public, so Codex teams can start there. Harness chose "Claude-Code-native, deep" over "multi-runtime, shallow"; cross-runtime collaboration with sibling repos (meta-harness, harness-init, OpenRig) is on the roadmap.
 
