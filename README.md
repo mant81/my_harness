@@ -93,7 +93,7 @@ Phase 7: Harness Evolution (feedback → continuous update)
 
 #### Install the plugin
 ```shell
-/plugin install harness@harness-marketplace
+/plugin install myharness@harness-marketplace
 ```
 
 ### Direct Installation as Global Skill

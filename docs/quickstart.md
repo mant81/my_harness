@@ -19,7 +19,7 @@
 claude plugin marketplace add cookyman74/my_harness
 ```
 
-**What this does:** Registers the `harness` marketplace so Claude Code can discover plugins published by `cookyman`.
+**What this does:** Registers the `harness-marketplace` so Claude Code can discover plugins published by `cookyman`.
 
 **Expected output:** `Added marketplace: cookyman74/my_harness`
 
@@ -28,13 +28,13 @@ claude plugin marketplace add cookyman74/my_harness
 ## Step 2 — Install the plugin and enable the Experimental flag (40 seconds)
 
 ```bash
-claude plugin install harness@harness-marketplace
+claude plugin install myharness@harness-marketplace
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
 *(To persist the flag across shell sessions, append the `export` line to `~/.zshrc` or `~/.bashrc`.)*
 
-**What this does:** Installs the `harness` plugin from the `harness` marketplace, then enables Agent Teams — the Claude Code API harness uses to orchestrate multi-agent workflows. See [`docs/experimental-dependency.md`](./experimental-dependency.md) for why the flag is required.
+**What this does:** Installs the `myharness` plugin from the `harness-marketplace` marketplace, then enables Agent Teams — the Claude Code API harness uses to orchestrate multi-agent workflows. See [`docs/experimental-dependency.md`](./experimental-dependency.md) for why the flag is required.
 
 **Failure FAQ #1 — `AGENT_TEAMS not found` / teams don't instantiate**
 **Cause:** Claude Code version is older than v2.x (Agent Teams was introduced in v2.0).
@@ -48,7 +48,7 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 claude "build a harness for a fintech risk-assessment team"
 ```
 
-**What this does:** Invokes the `/harness:harness` meta-skill, which analyzes your domain sentence and scaffolds a team of specialized agents + their skills into `.claude/agents/` and `.claude/skills/` in the current directory.
+**What this does:** Invokes the `/myharness` meta-skill, which analyzes your domain sentence and scaffolds a team of specialized agents + their skills into `.claude/agents/` and `.claude/skills/` in the current directory.
 
 **Try these alternate prompts** — any of them work:
 - `claude "하네스 구성해줘 — 핀테크 리스크 평가 팀"` (Korean also works)
@@ -76,7 +76,7 @@ ls -la .claude/skills/
 
 **Failure FAQ #3 — "Nothing was generated" / directories are empty**
 **Cause:** The plugin is not actually installed or is not active in the current project.
-**Fix:** Run `claude plugin list`. If `harness@harness` is absent, repeat Step 2. If present but inactive, run `claude plugin enable harness@harness`, then repeat Step 3.
+**Fix:** Run `claude plugin list`. If `myharness@harness-marketplace` is absent, repeat Step 2. If present but inactive, run `claude plugin enable myharness@harness-marketplace`, then repeat Step 3.
 
 ---
 
