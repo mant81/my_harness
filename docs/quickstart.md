@@ -28,7 +28,7 @@ claude plugin marketplace add cookyman74/my_harness
 ## Step 2 — Install the plugin and enable the Experimental flag (40 seconds)
 
 ```bash
-claude plugin install harness@harness
+claude plugin install harness@harness-marketplace
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
