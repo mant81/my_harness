@@ -48,7 +48,7 @@ Harness는 Claude Code 생태계의 **L3 Meta-Factory** 층 — 다른 하네스
 - **검증 체계** — 트리거 검증, 드라이런 테스트, With-skill vs Without-skill 비교 테스트
 - **2층 품질 게이트** — 내부 생성-검증 QA **+** 외부 독립 리뷰 루프(`external-review-loop`): codex/gemini CLI가 단계 산출물을 리뷰하고, 오케스트레이터가 실코드 대조로 전건 판정(확인/부분/이월/기각) 후 확인분만 TDD로 수정. 도구 연동을 먼저 점검(`check-review-tools.sh`)해 codex/gemini가 없으면 스킬을 생성하지 않음.
 - **교리 주입** — 생성된 코드/수정 에이전트에 TDD(`tdd-doctrine.md`)·개발 규칙(`dev-rules.md`)을 실경로로 주입. 리스크 등급(경량/표준/중대)으로 게이트 강도 조절.
-- **듀얼 런타임 (Claude Code + Codex)** — 단일 출처(`skills/harness/`) + 런타임별 얇은 어댑터. 팩토리가 `CLAUDE.md`·`AGENTS.md` 포인터를 둘 다 출력하고 오케스트레이션을 분기(Claude `TeamCreate` ↔ Codex 네이티브 subagents / `codex exec`). 상세: `references/runtime-adapters.md`.
+- **듀얼 런타임 (Claude Code + Codex)** — 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. 팩토리가 `CLAUDE.md`·`AGENTS.md` 포인터를 둘 다 출력하고 오케스트레이션을 분기(Claude `TeamCreate` ↔ Codex 네이티브 subagents / `codex exec`). 상세: `references/runtime-adapters.md`.
 
 ## 철학 — 스킬 ↔ 에이전트
 
@@ -65,12 +65,12 @@ Harness는 Claude Code 생태계의 **L3 Meta-Factory** 층 — 다른 하네스
 
 ## 하네스 진화 메커니즘 (Harness Evolution Mechanism)
 
-하네스 진화 메커니즘은 "무엇이 먹혔고 무엇이 안 먹혔는가"의 델타를 팩토리로 되먹여, 다음 세대가 측정 가능하게 더 나아지도록 합니다. 실제 프로젝트에서 생성된 하네스가 사용될 때, `/harness:evolve` 스킬이 초기 아키텍처와 최종 출시 아키텍처 간 변화량을 포착해 팩토리로 되먹입니다. 다음번 같은 도메인에 대한 생성은 이 되먹임을 반영해 "출시 상태에 더 가까운 초안"에서 시작합니다.
+하네스 진화 메커니즘은 "무엇이 먹혔고 무엇이 안 먹혔는가"의 델타를 팩토리로 되먹여, 다음 세대가 측정 가능하게 더 나아지도록 합니다. 실제 프로젝트에서 생성된 하네스가 사용될 때, `/myharness:evolve` 스킬이 초기 아키텍처와 최종 출시 아키텍처 간 변화량을 포착해 팩토리로 되먹입니다. 다음번 같은 도메인에 대한 생성은 이 되먹임을 반영해 "출시 상태에 더 가까운 초안"에서 시작합니다.
 
 ```
 초기 하네스 ──▶ 실 프로젝트 사용 ──▶ 출시 하네스
                                           │
-                                          ▼ (/harness:evolve 로 델타 포착)
+                                          ▼ (/myharness:evolve 로 델타 포착)
                                     ┌───────────────┐
                                     │   팩토리      │◀── 더 나은 다음 세대 초안
                                     └───────────────┘
@@ -113,8 +113,8 @@ Phase 7: 하네스 진화 (피드백 → 지속 갱신)
 ### 글로벌 스킬로 직접 설치
 
 ```shell
-# skills 디렉토리를 ~/.claude/skills/harness/에 복사
-cp -r skills/harness ~/.claude/skills/harness
+# skills 디렉토리를 ~/.claude/skills/myharness/에 복사
+cp -r skills/myharness ~/.claude/skills/myharness
 ```
 
 ### Codex CLI (듀얼 런타임)
@@ -123,12 +123,12 @@ Codex는 `~/.codex/skills/`(사용자 글로벌)에서 스킬을 발견하며, u
 
 ```shell
 bash install.sh
-# → ~/.codex/skills/harness → skills/harness (심링크, 항상 최신)
-# → repo .agents/skills/harness (trusted 프로젝트용)
+# → ~/.codex/skills/myharness → skills/myharness (심링크, 항상 최신)
+# → repo .agents/skills/myharness (trusted 프로젝트용)
 # → AGENTS.md (Codex 자동 로드)
 ```
 
-Codex에서는 **`$harness`**, **`/skills`** 메뉴, 또는 description에 맞는 요청(예: "하네스 구성해줘")으로 호출합니다. `/harness`는 Codex 문법이 **아닙니다**(커스텀 슬래시 미지원). 설치 후 스킬 목록 재로딩을 위해 Codex 세션을 재시작하세요.
+Codex에서는 **`$myharness`**, **`/skills`** 메뉴, 또는 description에 맞는 요청(예: "하네스 구성해줘")으로 호출합니다. `/myharness`는 Codex 문법이 **아닙니다**(커스텀 슬래시 미지원). 설치 후 스킬 목록 재로딩을 위해 Codex 세션을 재시작하세요.
 
 ## 플러그인 구조
 

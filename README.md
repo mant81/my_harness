@@ -48,7 +48,7 @@ Harness lives at the **L3 Meta-Factory** layer of the Claude Code ecosystem — 
 - **Validation** — Trigger verification, dry-run testing, and with-skill vs without-skill comparison tests
 - **Two-Layer Quality Gate** — Internal Producer-Reviewer QA **plus** an external independent review loop (`external-review-loop`): codex/gemini CLIs review each stage's deliverable, the orchestrator adjudicates every issue against real code (confirm/partial/defer/reject), and only confirmed issues are fixed via TDD. Tool availability is checked first (`check-review-tools.sh`) so the skill is skipped when codex/gemini are absent.
 - **Doctrine Injection** — Generated code/modification agents get TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine injected by real path, with risk-tiered gate strength (light / standard / critical).
-- **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/harness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`). See `references/runtime-adapters.md`.
+- **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/myharness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`). See `references/runtime-adapters.md`.
 
 
 ## Philosophy — Skill ↔ Agent
@@ -99,8 +99,8 @@ Phase 7: Harness Evolution (feedback → continuous update)
 ### Direct Installation as Global Skill
 
 ```shell
-# Copy the skills directory to ~/.claude/skills/harness/
-cp -r skills/harness ~/.claude/skills/harness
+# Copy the skills directory to ~/.claude/skills/myharness/
+cp -r skills/myharness ~/.claude/skills/myharness
 ```
 
 ### Codex CLI (Dual Runtime)
@@ -109,12 +109,12 @@ Codex discovers skills from `~/.codex/skills/` (user-global) — and skills load
 
 ```shell
 bash install.sh
-# → ~/.codex/skills/harness → skills/harness (symlink, always latest)
-# → repo .agents/skills/harness (for trusted projects)
+# → ~/.codex/skills/myharness → skills/myharness (symlink, always latest)
+# → repo .agents/skills/myharness (for trusted projects)
 # → AGENTS.md (auto-loaded by Codex)
 ```
 
-Invoke in Codex with **`$harness`**, the **`/skills`** menu, or a description-matching request (e.g. "하네스 구성해줘"). Note: `/harness` is **not** valid Codex syntax (custom slash commands are unsupported); restart the Codex session after install so the skill list reloads.
+Invoke in Codex with **`$myharness`**, the **`/skills`** menu, or a description-matching request (e.g. "하네스 구성해줘"). Note: `/myharness` is **not** valid Codex syntax (custom slash commands are unsupported); restart the Codex session after install so the skill list reloads.
 
 ## Plugin Structure
 
