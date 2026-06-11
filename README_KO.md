@@ -107,7 +107,7 @@ Phase 7: 하네스 진화 (피드백 → 지속 갱신)
 
 #### 플러그인 설치
 ```shell
-/plugin install myharness@harness-marketplace
+/plugin install myharness@myharness-marketplace
 ```
 
 ### 글로벌 스킬로 직접 설치
