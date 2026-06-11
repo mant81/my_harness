@@ -1,5 +1,9 @@
 # 오케스트레이터 스킬 템플릿
 
+## 목차 (필요한 템플릿만 로드)
+- 템플릿 A: 에이전트 팀(기본) · B: 서브 에이전트 · C: 하이브리드 · D: Codex 런타임 어댑터(+동시성·에러 핸들링)
+- 작성 원칙 / 후속 작업 키워드 — 마무리 시. 실행 모드에 맞는 템플릿 1개만 읽으면 된다.
+
 오케스트레이터는 팀 전체를 조율하는 상위 스킬이다. 실행 모드별로 3가지 템플릿을 제공한다:
 
 - **템플릿 A: 에이전트 팀 모드 (기본)** — 2명 이상 협업 시 최우선 선택
@@ -292,16 +296,26 @@ subagents 병렬 또는 순차. 각 산출물 `_workspace/{phase}_{agent}_{artif
 ### codex exec subprocess (독립 병렬·CI)
 ```bash
 mkdir -p _workspace
+trap 'pkill -P $$ 2>/dev/null' EXIT      # 좀비 방지
+TO="$(command -v timeout || command -v gtimeout || true)"   # macOS 이식성
 # stdin 폐쇄 필수(< /dev/null) — 안 하면 codex exec 무한 대기
-codex exec --sandbox read-only --json -o _workspace/{phase}_{agent}.md \
+# 동시 실행 cap을 지켜라(아래 동시성 정책). 초과분은 큐잉.
+${TO:+$TO 600s} codex exec --sandbox read-only --json -o _workspace/{phase}_{agent}.md \
   "$(cat _workspace/{agent}_prompt.md)" < /dev/null &
 wait   # 여러 개 띄운 뒤
 ```
-- 베스트 프랙티스(검증): 기본 `read-only` / 쓰기만 `--sandbox workspace-write` / 스크립트 소비 `--json` / 최종 메시지만 `-o`(`--output-last-message`) / 격리 `--ignore-user-config`.
+- 베스트 프랙티스(검증): 기본 `read-only` / 쓰기만 `--sandbox workspace-write` / 스크립트 소비 `--json` / 최종 메시지만 `-o` / 격리 `--ignore-user-config`.
 - 외부 리뷰 게이트(external-review-loop)는 양쪽 동일 — 이미 subprocess.
+
+### 동시성 정책 (백프레셔)
+대규모 fan-out(에이전트 7+ · 다중 codex exec)은 CPU·file I/O·API quota·토큰을 폭증시킨다.
+- **동시 실행 cap 기본 3, 최대 5** — 초과는 큐잉(`_workspace/status/*.json` claim/lease).
+- **외부 리뷰는 별도 cap 2** (codex+gemini 1쌍).
+- 각 subprocess는 PID 수집·exit code 확인·실패 1회 재시도·잔여 kill.
 
 ### 에러 핸들링
 - 실패 작업 1회 재시도 → 누락 명시 후 진행. 산출물 충돌: 출처 병기, 삭제 금지(A와 동일).
+- **상태/실패 감지:** `_workspace/status/{agent}.json`(status·heartbeat·retry_count·artifact_path)로 stale(무응답) 판정·재시작 idempotency·부분 산출물 유효성 확인.
 
 ### 데이터 흐름
 [오케스트레이터] → subagents/순차/codex exec → `_workspace/*.md` → Read 통합 → 최종 산출물

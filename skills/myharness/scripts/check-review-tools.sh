@@ -3,7 +3,8 @@
 # 용도: 하네스 생성 시 external-review-loop 스킬을 만들지 결정 + 생성 스킬의 런타임 폴백.
 # 사용: bash check-review-tools.sh
 # 출력 끝줄: AVAILABLE: <codex|gemini 공백구분 | none>
-# 종료코드: 0 = 1개 이상 사용가능, 1 = 전무.
+# 종료코드: 항상 0 (none도 정상 신호). 도구 유무는 끝줄 AVAILABLE만 신뢰할 것
+#   — set -e/자동화 파이프라인이 파싱 전 중단되는 것을 막기 위함.
 set -uo pipefail
 
 avail=()
