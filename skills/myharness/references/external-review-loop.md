@@ -38,13 +38,17 @@ gemini는 동일 틀 + "성능/속도·안정성 중심으로" 추가.
 ```bash
 mkdir -p _workspace/reviews
 # 주의: codex exec는 stdin 열려 있으면 무한 대기 → 반드시 < /dev/null
-codex exec --sandbox read-only "$(cat _workspace/reviews/{단계ID}_prompt_general.md)" < /dev/null \
+# 타임아웃 필수(timeout 600s) — 무한 대기·좀비 프로세스 방지. exit 124 = 타임아웃.
+timeout 600s codex exec --sandbox read-only "$(cat _workspace/reviews/{단계ID}_prompt_general.md)" < /dev/null \
   > _workspace/reviews/{단계ID}_codex.md 2>&1 &
-gemini -p "$(cat _workspace/reviews/{단계ID}_prompt_perf.md)" < /dev/null \
+# gemini는 자체 sandbox 옵션이 없다(읽기전용 보장 불가). 프롬프트로만 "읽기 전용 리뷰"를 제약하고,
+# 쓰기 위험이 우려되면 read-only 권한 셸/복제본에서 실행할 것.
+timeout 600s gemini -p "$(cat _workspace/reviews/{단계ID}_prompt_perf.md)" < /dev/null \
   > _workspace/reviews/{단계ID}_gemini.md 2>&1 &
+wait
 ```
-- Bash `run_in_background` + timeout 600s.
-- 실패/타임아웃 → 1회 재시도 → 재실패 시 해당 도구 누락 명시 후 단일 출처로 진행(**루프 차단 금지**).
+- Bash `run_in_background` 사용 가능. 타임아웃(exit 124) → 1회 재시도 → 재실패 시 해당 도구 누락 명시 후 단일 출처로 진행(**루프 차단 금지**).
+- gemini `-p` 플래그가 없는 버전이면 `cat prompt.md | gemini` 또는 `gemini "$(cat prompt.md)"`로 대체.
 - **도구 부재 폴백:** codex/gemini 미설치면 그 사실을 결과서에 명시하고 내부 QA만으로 진행.
 
 ## Step 3 — 이슈 통합

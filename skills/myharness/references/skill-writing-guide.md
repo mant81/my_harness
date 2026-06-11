@@ -153,6 +153,8 @@ bigquery-skill/
 
 ### 패턴 2: 조건부 상세
 
+(아래는 가상 예시 — `docx-js.md`·`redlining.md`는 실제 파일이 아니라 작성 패턴 설명용.)
+
 ```markdown
 # DOCX 처리
 

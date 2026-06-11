@@ -16,9 +16,11 @@ for t in codex gemini; do
   fi
 done
 
+# 상태는 끝줄 AVAILABLE로만 전달한다. 항상 exit 0 — set -e/자동화 파이프라인이
+# 출력 파싱 전에 중단되는 것을 막기 위함(none도 정상 신호).
 if [ "${#avail[@]}" -eq 0 ]; then
   echo "AVAILABLE: none"
-  exit 1
+else
+  echo "AVAILABLE: ${avail[*]}"
 fi
-echo "AVAILABLE: ${avail[*]}"
 exit 0
