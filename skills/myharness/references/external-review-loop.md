@@ -34,7 +34,7 @@ while True:
   if round >= MAX_ROUNDS(기본 3): break + 잔여 미수렴 보고
   round += 1
 ```
-- **K회 연속 신규 확인 0건**이면 수렴 종료. **MAX_ROUNDS 도달 시 강제 종료 + 미수렴 이슈 보고**(무한 루프 차단).
+- **K회 연속 신규 확인 0건**이면 수렴 종료. **MAX_ROUNDS 도달 시 강제 종료 + 미수렴 이슈 보고**(무한 루프 차단). **품질 θ 미달이 명백하면 `failed-quality-gate`로 즉시 중단**(MAX_ROUNDS 헛돌지 않게). 종료 사유는 `converged-good`/`exhausted`/`max-rounds`/`failed-quality-gate` 라벨로 기록. (gate/assertion은 코드 단계 전용 — 설계·문서는 `verdicts.json` 완료+정본 대조로 종료. 상세: `loop-self-eval.md`)
 - **수정본 재리뷰(req)**: round>1은 이전 라운드 수정 diff만 좁게 재리뷰 → 수정이 새 결함을 만들지 검증(같은 맹점 회피 전제가 수정에도 적용).
 - **판정 원장(req)**: `_workspace/reviews/{단계ID}_verdicts.json` — 이슈지문(파일+결함요지 해시)→ 판정·라운드·근거. 매 라운드 **seen 대조로 신규만 판정**(기각 이슈 재부상 방지, dedup vs seen).
 
@@ -99,6 +99,9 @@ wait
    - 승인 관문 기본: 사용자 대기. `_workspace/.autonomous` 마커(또는 "자율로" 발화) 시 자동 통과.
    - **push는 자율이어도 기본 대기** — `_workspace/.autonomous-push` 마커 시만 자동.
    - 권한모드(bypassPermissions)는 스킬이 못 읽으므로 마커/발화로 명시. 마커 ON이어도 리뷰·판정·게이트는 그대로(인간 승인 한 스텝만 생략).
+
+## Step 8 — 자체 평가 (1단계: 측정 로깅만)
+루프 종료 시 `_workspace/evals/external-review/{단계ID}/{run_id}/scorecard.json` 발행 — `rounds`·`termination_reason`·`verdict_counts`·`new_per_round`·`alignment_score`(정밀도 아님)·`rounds_normalized`·`cost_per_run`·`cost_per_confirmed`(confirmed>0만). **측정·기록만**. 자동 흐름 변경 없음(자기강화·플래핑 방지). 스키마·메트릭 정의·단계적 도입(수동 리포트→제안 트리거→자동)은 `loop-self-eval.md`. recall(놓친 결함)은 Ground Truth 있을 때만.
 
 ## 재진입 (루프 라운드 = 재진입)
 재진입은 위 **루프 제어**의 라운드 반복으로 일원화한다. round>1은 직전 수정분 diff만 좁게 재리뷰하고, `verdicts.json` seen 대조로 기수정·기각 이슈는 다시 판정하지 않는다("기수정 확인"은 원장+게이트 재실행으로 갈음). 사용자가 동일 목록을 수동 재제출해도 원장 대조 → 신규만 판정.
