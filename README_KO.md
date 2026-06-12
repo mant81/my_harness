@@ -46,7 +46,8 @@ Harness는 Claude Code 생태계의 **L3 Meta-Factory** 층 — 다른 하네스
 - **스킬 생성** — Progressive Disclosure 패턴으로 컨텍스트를 효율 관리하는 스킬 자동 생성
 - **오케스트레이션** — 에이전트 간 데이터 전달, 에러 핸들링, 팀 조율 프로토콜 포함
 - **검증 체계** — 트리거 검증, 드라이런 테스트, With-skill vs Without-skill 비교 테스트
-- **2층 품질 게이트** — 내부 생성-검증 QA **+** 외부 독립 리뷰 루프(`external-review-loop`): codex/gemini CLI가 단계 산출물을 리뷰하고, 오케스트레이터가 실코드 대조로 전건 판정(확인/부분/이월/기각) 후 확인분만 TDD로 수정. 도구 연동을 먼저 점검(`check-review-tools.sh`)해 codex/gemini가 없으면 스킬을 생성하지 않음.
+- **2층 품질 게이트** — 내부 생성-검증 QA **+** 외부 독립 리뷰 루프(`external-review-loop`): codex/gemini CLI가 단계 산출물을 리뷰하고, 오케스트레이터가 실코드 대조로 전건 판정(확인/부분/이월/기각) 후 확인분만 TDD로 수정. **수렴 루프** — loop-until-dry + 라운드 상한 + 판정 원장(dedup vs seen, 기각 재부상 방지) + 수정본 재리뷰. 도구 연동을 먼저 점검(`check-review-tools.sh`)해 codex/gemini가 없으면 스킬을 생성하지 않음.
+- **루프 자체 평가** — 각 루프가 `loop_scorecard.json`(alignment_score·판정 카운트·정규화 라운드·비용·종료 라벨) 발행 → 단계적 자기개선(측정→수동 리포트→제안→자동), 자기강화 방지장치(제안만+승인·롤링윈도우·최소 표본; recall은 Ground Truth로만). 상세: `references/loop-self-eval.md`.
 - **교리 주입** — 생성된 코드/수정 에이전트에 TDD(`tdd-doctrine.md`)·개발 규칙(`dev-rules.md`)을 실경로로 주입. 리스크 등급(경량/표준/중대)으로 게이트 강도 조절.
 - **듀얼 런타임 (Claude Code + Codex)** — 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. 팩토리가 `CLAUDE.md`·`AGENTS.md` 포인터를 둘 다 출력하고 오케스트레이션을 분기(Claude `TeamCreate` ↔ Codex 네이티브 subagents / `codex exec`). Phase 7 런타임 동기화로 drift 방지. 상세: `references/runtime-adapters.md`.
 - **비용·동시성 통제** — 모델 라우팅(고추론 → `opus`, 단순 작업 → 경량 모델), 동시성 cap+백프레셔(기본 3·최대 5), 외부 리뷰 예산(skip-when-no-delta·`.fast-pass`), smoke/full 테스트 모드로 대규모 fan-out 비용 억제. 이식성 도구(`timeout`/`gtimeout` 탐지·프로세스 정리).
@@ -147,7 +148,8 @@ harness/
 │       │   ├── skill-writing-guide.md     # 스킬 작성 가이드
 │       │   ├── skill-testing-guide.md     # 테스트/평가 방법론
 │       │   ├── qa-agent-guide.md          # QA 에이전트 통합 가이드
-│       │   ├── external-review-loop.md    # codex/gemini 외부 리뷰 게이트 (방법론+템플릿)
+│       │   ├── external-review-loop.md    # codex/gemini 외부 리뷰 게이트 (수렴 루프 + 템플릿)
+│       │   ├── loop-self-eval.md          # 루프 scorecard + 단계적 자기개선
 │       │   ├── tdd-doctrine.md            # TDD 교리 (코드 에이전트 주입용)
 │       │   ├── dev-rules.md               # 개발 규칙 (코드 에이전트 주입용)
 │       │   └── runtime-adapters.md        # Claude Code / Codex 듀얼 런타임 설계

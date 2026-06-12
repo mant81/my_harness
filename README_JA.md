@@ -46,7 +46,8 @@ Harness は Claude Code エコシステムの **L3 Meta-Factory** 層 — 他の
 - **スキル生成** — Progressive Disclosureパターンによるコンテキストの効率的管理を備えたスキルを自動生成
 - **オーケストレーション** — エージェント間のデータ受け渡し、エラーハンドリング、チーム連携プロトコルを内蔵
 - **検証体制** — トリガー検証、ドライランテスト、With-skill vs Without-skill 比較テスト
-- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：codex/gemini CLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。先にツール連携を点検（`check-review-tools.sh`）し、codex/geminiが無ければスキルを生成しない。
+- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：codex/gemini CLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。**収束ループ** — loop-until-dry＋ラウンド上限＋判定台帳（dedup vs seen、却下の再浮上防止）＋修正分の再レビュー。先にツール連携を点検（`check-review-tools.sh`）し、codex/geminiが無ければスキルを生成しない。
+- **ループ自己評価** — 各ループが `loop_scorecard.json`（alignment_score・判定カウント・正規化ラウンド・コスト・終了ラベル）を発行 → 段階的な自己改善（測定→手動レポート→提案→自動）、自己強化防止（提案のみ＋承認・ローリングウィンドウ・最小サンプル；recall は Ground Truth のみ）。詳細：`references/loop-self-eval.md`。
 - **ドクトリン注入** — 生成されたコード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入。リスク等級（軽量/標準/重大）でゲート強度を調整。
 - **デュアルランタイム（Claude Code + Codex）** — 単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。ファクトリーが `CLAUDE.md`・`AGENTS.md` ポインターを両方出力し、オーケストレーションを分岐（Claude `TeamCreate` ↔ Codex ネイティブ subagents / `codex exec`）。Phase 7 のランタイム同期で drift を防止。詳細：`references/runtime-adapters.md`。
 - **コスト・並行性の制御** — モデルルーティング（高推論 → `opus`、単純タスク → 軽量モデル）、並行数上限＋バックプレッシャー（既定 3・最大 5）、外部レビュー予算（skip-when-no-delta・`.fast-pass`）、smoke/full テストモードで大規模ファンアウトのコストを抑制。移植性ツール（`timeout`/`gtimeout` 検出・プロセス整理）。
@@ -147,7 +148,8 @@ harness/
 │       │   ├── skill-writing-guide.md     # スキル作成ガイド
 │       │   ├── skill-testing-guide.md     # テスト・評価方法論
 │       │   ├── qa-agent-guide.md          # QAエージェント統合ガイド
-│       │   ├── external-review-loop.md    # codex/gemini 外部レビューゲート（方法論＋テンプレート）
+│       │   ├── external-review-loop.md    # codex/gemini 外部レビューゲート（収束ループ＋テンプレート）
+│       │   ├── loop-self-eval.md          # ループ scorecard ＋ 段階的自己改善
 │       │   ├── tdd-doctrine.md            # TDDドクトリン（コードエージェント注入用）
 │       │   ├── dev-rules.md               # 開発ルール（コードエージェント注入用）
 │       │   └── runtime-adapters.md        # Claude Code / Codex デュアルランタイム設計
