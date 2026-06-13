@@ -486,6 +486,7 @@ Phase마다 다른 모드를 섞어 구성한다. 자주 쓰이는 조합:
 - **스킬 테스트 가이드**: `references/skill-testing-guide.md` — 테스트/평가/반복 개선 방법론
 - **QA 에이전트 가이드**: `references/qa-agent-guide.md` — 빌드 하네스에 QA 에이전트를 포함할 때 참조. 통합 정합성 검증 방법론, 경계면 버그 패턴, QA 에이전트 정의 템플릿 포함. 실제 프로젝트에서 발견된 7개 버그 사례 기반.
 - **루프 자체 평가**: `references/loop-self-eval.md` — 루프 scorecard 스키마·교정 메트릭(alignment_score·종료 라벨·recall은 Ground Truth)·단계적 도입(측정만→수동→제안→자동). 자기강화·플래핑 방지.
+- **자기개선 루프**: `references/self-improvement-loop.md` — 생성 스킬/에이전트를 벤치마크로 측정→제안→holdout 검증→승인→채택(설계 정본). 4앵커+독립성·holdout 누수 방지·immutable baseline·통계 기준·capability 등급·비용 통제·rollback. 자동 적용 아님(MVP 단계적). `loop_scorecard`(루프)와 `artifact_benchmark`(산출물) 용어 분리.
 - **외부 리뷰 루프**: `references/external-review-loop.md` — codex/gemini 독립 검증 단계 게이트. 방법론 겸 생성 템플릿. **루프 제어(loop-until-dry·MAX_ROUNDS·라운드 카운터)·판정 원장(verdicts.json, dedup vs seen)·수정본 재리뷰·근거수집 위임/확정 비위임**·기각 사유표·커밋 순서·자율 노브 포함.
 - **TDD 교리 / 개발 규칙**: `references/tdd-doctrine.md`, `references/dev-rules.md` — 코드/수정 에이전트 작업 원칙 주입용.
 - **런타임 어댑터**: `references/runtime-adapters.md` — Claude Code/Codex 듀얼 런타임 설계. 진입점·오케스트레이션 매핑, AGENTS.md·`.agents/skills/` 생성, 설치(Codex 공식 docs 검증).
