@@ -52,7 +52,7 @@ while True:
 gemini는 동일 틀 + "성능/속도·안정성 중심으로" 추가.
 
 ## Step 2 — 병렬 비대화 실행
-먼저 `bash scripts/check-review-tools.sh`로 사용가능 도구 재확인(끝줄 `AVAILABLE:`). 사용가능 도구만 실행한다. 루트에서 백그라운드 병렬·읽기전용. 프롬프트·출력 모두 `_workspace/reviews/`에 보존(감사 — /tmp 금지).
+먼저 `bash .claude/skills/external-review-loop/scripts/check-review-tools.sh`로 사용가능 도구 재확인(끝줄 `AVAILABLE:`). (경로는 생성된 스킬 기준 — Codex면 `.agents/skills/...`) 사용가능 도구만 실행한다. 루트에서 백그라운드 병렬·읽기전용. 프롬프트·출력 모두 `_workspace/reviews/`에 보존(감사 — /tmp 금지).
 ```bash
 mkdir -p _workspace/reviews
 trap 'pkill -P $$ 2>/dev/null' EXIT   # 셸 종료 시 하위 프로세스 정리(좀비 방지)
@@ -101,7 +101,7 @@ wait
    - 권한모드(bypassPermissions)는 스킬이 못 읽으므로 마커/발화로 명시. 마커 ON이어도 리뷰·판정·게이트는 그대로(인간 승인 한 스텝만 생략).
 
 ## Step 8 — 자체 평가 (1단계: 측정 로깅만, 계산 도출)
-루프 종료 시 **`bash scripts/build-scorecard.sh {단계ID}_verdicts.json _workspace/evals/external-review/{단계ID}/{run_id}/scorecard.json [timing.json]`** 실행 — verdict_counts·rounds·`alignment_score`(정밀도 아님)·`*_rate`·cost·**`regression_catch_rate`**(round>1 재리뷰가 잡은 회귀/누출 — 전체 recall 아님)를 **스크립트가 verdicts.json에서 기계 계산**(LLM 자기보고 아님). 라벨(`converged-good`/`converged`/`max-rounds`/...)만 오케스트레이터가 해석. **측정·기록만**, 자동 흐름 변경 없음.
+루프 종료 시 **`bash .claude/skills/external-review-loop/scripts/build-scorecard.sh {단계ID}_verdicts.json _workspace/evals/external-review/{단계ID}/{run_id}/scorecard.json [timing.json]`** 실행 — verdict_counts·rounds·`alignment_score`(정밀도 아님)·`*_rate`·cost·**`regression_catch_rate`**(round>1 재리뷰가 잡은 회귀/누출 — 전체 recall 아님)를 **스크립트가 verdicts.json에서 기계 계산**(LLM 자기보고 아님). 라벨(`converged-good`/`converged`/`max-rounds`/...)만 오케스트레이터가 해석. **측정·기록만**, 자동 흐름 변경 없음.
 - `verdicts.json` 각 이슈에 `round`·`source` 기록(round>1 재리뷰분은 `source:"re-review"`)해야 regression_catch_rate 계산됨.
 - 스크립트가 `summary.jsonl`에 집계 append → Phase 0/7 진입 시 **요약만** 읽음(읽기 경로, Lean). 스키마·졸업 기준·단계적 도입은 `loop-self-eval.md`. (jq 필요)
 

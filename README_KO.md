@@ -135,13 +135,14 @@ Codex에서는 **`$myharness`**, **`/skills`** 메뉴, 또는 description에 맞
 ## 플러그인 구조
 
 ```
-harness/
+my_harness/
 ├── .claude-plugin/
-│   └── plugin.json                 # 플러그인 매니페스트
+│   └── plugin.json                 # 플러그인 매니페스트 (name: myharness)
 ├── skills/
-│   └── harness/
+│   └── myharness/
 │       ├── SKILL.md                # 메인 스킬 정의 (7 Phase 워크플로우)
 │       ├── references/
+│       │   ├── factory-map.md             # 항법: 최소 경로·구현 상태·루프 지도 (먼저 읽기)
 │       │   ├── agent-design-patterns.md   # 6가지 아키텍처 패턴
 │       │   ├── orchestrator-template.md   # 팀/서브/Codex 오케스트레이터 템플릿
 │       │   ├── team-examples.md           # 실전 팀 구성 예시
@@ -149,12 +150,14 @@ harness/
 │       │   ├── skill-testing-guide.md     # 테스트/평가 방법론
 │       │   ├── qa-agent-guide.md          # QA 에이전트 통합 가이드
 │       │   ├── external-review-loop.md    # codex/gemini 외부 리뷰 게이트 (수렴 루프 + 템플릿)
-│       │   ├── loop-self-eval.md          # 루프 scorecard + 단계적 자기개선
+│       │   ├── loop-self-eval.md          # 루프 scorecard (측정 전용; 3·4단계 실험적)
+│       │   ├── self-improvement-loop.md   # 벤치마크 앵커 산출물 개선 (설계만)
 │       │   ├── tdd-doctrine.md            # TDD 교리 (코드 에이전트 주입용)
 │       │   ├── dev-rules.md               # 개발 규칙 (코드 에이전트 주입용)
 │       │   └── runtime-adapters.md        # Claude Code / Codex 듀얼 런타임 설계
 │       └── scripts/
-│           └── check-review-tools.sh      # codex/gemini 연동 점검
+│           ├── check-review-tools.sh      # codex/gemini 연동 점검
+│           └── build-scorecard.sh         # verdicts에서 loop_scorecard 계산
 ├── AGENTS.md                       # Codex 런타임 진입점
 ├── install.sh                      # 듀얼 런타임 설치 (Claude + Codex)
 └── README.md
@@ -300,13 +303,9 @@ Harness는 Claude Code / 에이전트 프레임워크 생태계에서 혼자가 
 </details>
 
 <details>
-<summary><b>Q2. "Claude Code 전용"이 너무 좁은 것 아닌가요? Gemini·Codex는?</b></summary>
+<summary><b>Q2. 어떤 런타임을 지원하나요 — Claude Code, Codex?</b></summary>
 
-**A.** 현재 공식 런타임은 Claude Code 단일입니다. 같은 컨셉의 Codex 포트 [SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness)가 이미 공개되어 있어, 기존 Codex 팀은 그쪽에서 바로 시작할 수 있습니다. Harness는 "Claude Code 네이티브·깊게"를 택한 상태이며, 크로스 런타임 수요는 공존 저장소(meta-harness, harness-init, OpenRig)와의 연계 계획을 로드맵에 반영할 예정입니다.
-
-**Evidence:**
-- Codex 포트: [github.com/SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness)
-- 크로스 런타임 스캐폴더: [github.com/Gizele1/harness-init](https://github.com/Gizele1/harness-init)
+**A.** 둘 다. myharness는 **듀얼 런타임**입니다: 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. Claude Code가 주(가장 자동화됨 — `TeamCreate` 에이전트 팀), Codex는 `AGENTS.md` + `.agents/skills/` + 네이티브 subagents / `codex exec`로 지원(`$myharness` 또는 `/skills`로 호출). 상세: `skills/myharness/references/runtime-adapters.md`. Gemini는 호스트 런타임이 아니라 외부 리뷰(codex/gemini) 리뷰어로 사용.
 </details>
 
 ## 라이선스

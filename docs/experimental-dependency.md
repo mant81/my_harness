@@ -40,7 +40,7 @@ The design rationale and roadmap for this flag live in three Anthropic Engineeri
 ## Dependency Graph
 
 ```
-harness (v1.2.0)
+myharness (v1.0.0)
   └── Agent Teams API (Claude Code)
         ├── TeamCreate            ← EXPERIMENTAL_AGENT_TEAMS=1
         ├── SendMessage           ← EXPERIMENTAL_AGENT_TEAMS=1
@@ -70,7 +70,7 @@ Each scenario lists the **detection trigger** (how we will know it happened), th
 |------------|--------|----------|
 | **T+24h** | Open branch `feat/drop-experimental-flag`. Remove `export` line from every README / docs / Quickstart. Add `claude-code >= X.Y.Z` lower bound in `plugin.json`. | Branch + PR (draft) |
 | **T+48h** | Publish `docs/migrating-from-experimental.md`. Update `docs/experimental-dependency.md` (this file) headline to "no flag required as of vX.Y". Pin GitHub issue: "Action required: drop the export line". | Migration guide + pinned issue |
-| **T+72h** | Ship **v1.3.0** release with: (a) CHANGELOG entry, (b) `gh release create` with migration note, (c) HN follow-up: "We dropped the experimental flag". | `v1.3.0` git tag + GH Release |
+| **T+72h** | Ship the **next release** (예: v1.x) with: (a) CHANGELOG entry, (b) `gh release create` with migration note, (c) HN follow-up: "We dropped the experimental flag". | next-version git tag + GH Release |
 
 **Adopter impact:** Positive. Enterprise approval friction drops — one checkbox ("no experimental flags") becomes satisfiable. No breaking change to harness user code.
 
@@ -103,7 +103,7 @@ Each scenario lists the **detection trigger** (how we will know it happened), th
 | Checkpoint | Action | Artifact |
 |------------|--------|----------|
 | **T+0 to T+24h** | Nightly CI alert fires in Slack/Discord. Author opens `hotfix/compat-<date>` branch, patches affected call sites. Unit tests green on both old + new signature (best effort). | Hotfix branch |
-| **T+24h** | Merge hotfix. Push `v1.2.x` patch tag. Update `docs/compatibility-matrix.md` row for affected Claude Code version. | `v1.2.x` patch release |
+| **T+24h** | Merge hotfix. Push the patch tag. Update `docs/compatibility-matrix.md` row for affected Claude Code version. | patch release |
 | **T+72h** | If the change is non-trivial (affects harness's public contract), publish a short notice on the repo Discussions tab + X. Otherwise, CHANGELOG entry is sufficient. | Discussions post (conditional) |
 
 **Adopter impact:** Existing pinned users on the prior Claude Code version are unaffected. Users on latest get a same-week patch.
@@ -149,5 +149,5 @@ We commit to the following **observable SLA**. Missing it is grounds for filing 
 
 **Related documents:**
 - [`docs/quickstart.md`](./quickstart.md) — 5-minute install walkthrough
-- [`docs/show-hn-launch-kit.md`](./show-hn-launch-kit.md) — Public launch package
+- `docs/show-hn-launch-kit.md` *(planned, not yet available)* — Public launch package
 - `docs/compatibility-matrix.md` *(pending P-13)* — Claude Code × harness version table

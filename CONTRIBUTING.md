@@ -53,7 +53,7 @@ Different kinds of contributions go through different entry points. Pick the one
 ### Security
 
 - Do **not** open a public issue for anything that could be abused.
-- Email: `cookyman@gmail.com` with subject prefix `[harness-security]`.
+- Email: `cookyman@gmail.com` with subject prefix `[myharness-security]`.
 - We aim to acknowledge within 7 days (see SLA table).
 
 ---
@@ -82,7 +82,7 @@ To test your changes in a local Claude Code session without publishing to the ma
 
 ```bash
 # From your checkout
-claude plugin link ./harness
+claude plugin link .
 
 # Verify
 claude plugin list | grep harness
@@ -189,7 +189,7 @@ This project adheres to the **Contributor Covenant v1.4** — in short:
 
 Full text: <https://www.contributor-covenant.org/version/1/4/code-of-conduct/>
 
-Report Code of Conduct violations privately to `cookyman@gmail.com` with subject prefix `[harness-coc]`.
+Report Code of Conduct violations privately to `cookyman@gmail.com` with subject prefix `[myharness-coc]`.
 
 ---
 

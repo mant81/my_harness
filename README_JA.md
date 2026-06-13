@@ -135,13 +135,14 @@ Codex では **`$myharness`**、**`/skills`** メニュー、または descripti
 ## プラグイン構成
 
 ```
-harness/
+my_harness/
 ├── .claude-plugin/
-│   └── plugin.json                 # プラグインマニフェスト
+│   └── plugin.json                 # プラグインマニフェスト (name: myharness)
 ├── skills/
-│   └── harness/
+│   └── myharness/
 │       ├── SKILL.md                # メインスキル定義（7フェーズワークフロー）
 │       ├── references/
+│       │   ├── factory-map.md             # 航法: 最小経路·実装状態·ループ地図（最初に読む）
 │       │   ├── agent-design-patterns.md   # 6種のアーキテクチャパターン
 │       │   ├── orchestrator-template.md   # チーム/サブ/Codex オーケストレーターテンプレート
 │       │   ├── team-examples.md           # 実践チーム構成例
@@ -149,12 +150,14 @@ harness/
 │       │   ├── skill-testing-guide.md     # テスト・評価方法論
 │       │   ├── qa-agent-guide.md          # QAエージェント統合ガイド
 │       │   ├── external-review-loop.md    # codex/gemini 外部レビューゲート（収束ループ＋テンプレート）
-│       │   ├── loop-self-eval.md          # ループ scorecard ＋ 段階的自己改善
+│       │   ├── loop-self-eval.md          # ループ scorecard（測定のみ; 3·4段階は実験的）
+│       │   ├── self-improvement-loop.md   # ベンチマーク基準の成果物改善（設計のみ）
 │       │   ├── tdd-doctrine.md            # TDDドクトリン（コードエージェント注入用）
 │       │   ├── dev-rules.md               # 開発ルール（コードエージェント注入用）
 │       │   └── runtime-adapters.md        # Claude Code / Codex デュアルランタイム設計
 │       └── scripts/
-│           └── check-review-tools.sh      # codex/gemini 連携チェック
+│           ├── check-review-tools.sh      # codex/gemini 連携チェック
+│           └── build-scorecard.sh         # verdicts から loop_scorecard 計算
 ├── AGENTS.md                       # Codex ランタイムのエントリポイント
 ├── install.sh                      # デュアルランタイムインストーラー（Claude + Codex）
 └── README.md
@@ -307,13 +310,9 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 </details>
 
 <details>
-<summary><b>Q2. 「Claude Code 専用」は狭すぎませんか？ Gemini・Codex は？</b></summary>
+<summary><b>Q2. どのランタイムをサポートしますか — Claude Code、Codex？</b></summary>
 
-**A.** 現時点で公式のランタイムは Claude Code のみです。同一コンセプトの Codex 移植 [SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness) がすでに公開されており、既存の Codex チームはそちらから開始できます。Harness は「Claude Code ネイティブ・深く」を選択しており、クロスランタイムの需要は共存リポジトリ（meta-harness、harness-init、OpenRig）との連携計画としてロードマップに反映される予定です。
-
-**Evidence:**
-- Codex 移植: [github.com/SaehwanPark/meta-harness](https://github.com/SaehwanPark/meta-harness)
-- クロスランタイム・スキャフォルダー: [github.com/Gizele1/harness-init](https://github.com/Gizele1/harness-init)
+**A.** 両方。myharness は **デュアルランタイム**：単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。Claude Code が主（最も自動化 — `TeamCreate` エージェントチーム）、Codex は `AGENTS.md`＋`.agents/skills/`＋ネイティブ subagents / `codex exec` で対応（`$myharness` または `/skills` で呼び出し）。詳細：`skills/myharness/references/runtime-adapters.md`。Gemini はホストランタイムではなく外部レビュー（codex/gemini）のレビュアーとして使用。
 </details>
 
 ## ライセンス

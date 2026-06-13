@@ -17,6 +17,7 @@ if ! command -v jq >/dev/null; then
   exit 0
 fi
 
+mkdir -p "$(dirname "$OUT")"   # 깊은 출력 경로 보장(없으면 리다이렉션 실패)
 tok=0
 [ -n "$T" ] && [ -f "$T" ] && tok="$(jq -r '.total_tokens // 0' "$T" 2>/dev/null || echo 0)"
 

@@ -1,0 +1,60 @@
+b1f5d6d docs(factory): add navigation layer (minimal-path, impl-status, loop map)
+68ab93d feat(factory): self-improvement-loop design + external review applied
+4ea15b7 feat(factory): loop self-eval maturity (priorities 1-4) + external review applied
+288065f docs: README (EN/KO/JA) — convergent review loop + loop self-evaluation
+1d7373f feat(factory): loop self-eval (corrected per external review)
+a86e335 fix(factory): make external-review-loop a real convergent loop
+ab81088 docs: update README (EN/KO/JA) with cost/concurrency control + runtime-sync from review
+af030aa perf(factory): apply 2nd external review (codex+gemini) — performance/stability
+f2af5bb fix(factory): apply 1st external review (codex+gemini) — dual-runtime threading + robustness
+2713094 docs(factory): policy review fixes P1+P2
+cf88584 chore: archive codex review logs (dual-runtime + skill invocation research)
+b7a37a8 refactor: rename marketplace to myharness-marketplace
+c3c3cf3 refactor: rename plugin to myharness (install: myharness@harness-marketplace)
+5aad9db fix: correct quickstart install command to harness@harness-marketplace
+a34ab5a refactor: rename skill command harness -> myharness (/myharness, $myharness)
+95ae914 fix: correct plugin install command to harness@harness-marketplace (KO/JA/index)
+78f0704 chore: remove +60% Research section, reset CHANGELOG to 1.0.0
+4be2d7d chore: remove +60% A/B FAQ, unify version to 1.0.0
+9abe62c fix: restore sibling-repo links (harness-100, claude-code-harness) to revfactory
+c085b38 chore: white-label to cookyman / my_harness
+ _workspace/reviews/factory-perf_gemini.md          |  136 +
+ _workspace/reviews/factory-perf_prompt.md          |   12 +
+ _workspace/reviews/factory-policy_codex.md         | 3176 ++++++++++++++++++++
+ _workspace/reviews/factory-policy_gemini.md        |   62 +
+ .../reviews/factory-policy_prompt_general.md       |   13 +
+ _workspace/reviews/factory-policy_prompt_robust.md |   13 +
+ _workspace/reviews/harness_invoke_codex.md         | 1775 +++++++++++
+ _workspace/reviews/harness_invoke_prompt.md        |    4 +
+ _workspace/reviews/loop-eval-v2_artifact.md        |   45 +
+ _workspace/reviews/loop-eval-v2_codex.md           |  639 ++++
+ _workspace/reviews/loop-eval-v2_gemini.md          |   46 +
+ _workspace/reviews/loop-eval-v2_prompt.md          |   12 +
+ _workspace/reviews/loop-eval-v2_prompt_perf.md     |   12 +
+ _workspace/reviews/self-improve_codex.md           |  689 +++++
+ _workspace/reviews/self-improve_gemini.md          |   60 +
+ _workspace/reviews/self-improve_prompt.md          |   13 +
+ _workspace/reviews/self-improve_prompt_perf.md     |   13 +
+ docs/experimental-dependency.md                    |    2 +-
+ docs/quickstart.md                                 |   14 +-
+ index.html                                         |   16 +-
+ install.sh                                         |   24 +-
+ privacy.html                                       |    6 +-
+ skills/harness/references/external-review-loop.md  |   83 -
+ skills/{harness => myharness}/SKILL.md             |   99 +-
+ .../references/agent-design-patterns.md            |    6 +-
+ .../{harness => myharness}/references/dev-rules.md |    2 +-
+ .../myharness/references/external-review-loop.md   |  115 +
+ skills/myharness/references/factory-map.md         |   42 +
+ skills/myharness/references/loop-self-eval.md      |   83 +
+ .../references/orchestrator-template.md            |   20 +-
+ .../references/qa-agent-guide.md                   |    0
+ .../references/runtime-adapters.md                 |    2 +-
+ .../myharness/references/self-improvement-loop.md  |   89 +
+ .../references/skill-testing-guide.md              |    0
+ .../references/skill-writing-guide.md              |    2 +
+ .../references/tdd-doctrine.md                     |    2 +-
+ .../references/team-examples.md                    |    3 +
+ skills/myharness/scripts/build-scorecard.sh        |   63 +
+ .../scripts/check-review-tools.sh                  |    9 +-
+ 58 files changed, 10532 insertions(+), 420 deletions(-)
