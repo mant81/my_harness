@@ -15,7 +15,7 @@
 - 상세: `skills/myharness/references/runtime-adapters.md`, 오케스트레이션은 `references/orchestrator-template.md` 템플릿 D.
 
 ## 외부 리뷰 게이트
-`skills/myharness/references/external-review-loop.md` — codex/gemini 독립 검증. 양쪽 런타임 동일하게 subprocess로 작동. `skills/myharness/scripts/check-review-tools.sh`로 도구 연동 점검(없으면 게이트 생략).
+`skills/myharness/references/external-review-loop.md` — codex/agy 독립 검증. 양쪽 런타임 동일하게 subprocess로 작동. `skills/myharness/scripts/check-review-tools.sh`로 도구 연동 점검(없으면 게이트 생략).
 
 ## codex exec 베스트 프랙티스 (자동화 시)
 기본 `--sandbox read-only` / 쓰기만 `workspace-write` / 스크립트 소비 `--json` / 최종 메시지만 `-o` / 격리 `--ignore-user-config` / stdin은 `< /dev/null`.

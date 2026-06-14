@@ -35,7 +35,7 @@ jq -n --slurpfile v "$V" --argjson tok "$tok" '
   # 분모: round==1 confirmed+partial (초기 라운드 기준 — 누적 아님)
   ($i | map(select(.round==1 and (.verdict=="confirmed" or .verdict=="partial"))) | length) as $reg_den |
   # 태깅 무결성: round>1 confirmed/partial 중 source 누락/비허용 → 경고(조용한 0 방지)
-  ($i | map(select(.round>1 and (.verdict=="confirmed" or .verdict=="partial") and ((.source//"")|IN("re-review","codex","gemini","orchestrator")|not))) | length) as $bad_src |
+  ($i | map(select(.round>1 and (.verdict=="confirmed" or .verdict=="partial") and ((.source//"")|IN("re-review","codex","agy","gemini","orchestrator")|not))) | length) as $bad_src |
   {
     schema_version:"1", loop:($d.loop//"external-review"), stage_id:($d.stage_id//"?"),
     rounds:($d.rounds // ($i|map(.round)|max // 1)),

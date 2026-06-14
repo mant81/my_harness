@@ -96,7 +96,7 @@
 3. **Baseline 비교 (vs 일반 LLM)** — baseline="이 프로젝트용 에이전트 팀 만들어줘"(plain), treatment=myharness. 비교 항목: 필수 파일 생성률·역할 중복률·검증 Phase 포함률·오케스트레이션 명확도·스킬 trigger 품질·런타임 정합성·재작업 횟수.
    - ⚠️ **자체측정은 약증거.** "X% 우수" 주장 시 **n·측정자·blind(candidate/baseline 익명)·holdout**을 같은 문장에 명시. 작은 n으로 단정 금지(과거 "+60% n=15" 과대주장 함정 회피). 객관 항목(파일 생성률 등) 우선, 주관 항목은 blind judge.
 
-4. **External Review Evidence** — codex/gemini 외부 리뷰 루프 결과를 *증거로 남김*. "독립 리뷰어가 무엇을 잡았고 무엇을 통과시켰나"를 로그로 공개(`_workspace/reviews/`). 통과만이 아니라 **기각·미수렴도 공개**(체리피킹 금지).
+4. **External Review Evidence** — codex/agy 외부 리뷰 루프 결과를 *증거로 남김*. "독립 리뷰어가 무엇을 잡았고 무엇을 통과시켰나"를 로그로 공개(`_workspace/reviews/`). 통과만이 아니라 **기각·미수렴도 공개**(체리피킹 금지).
 
 5. **Scorecard 공개** — 케이스별 점수를 표로. 예(서식 예시 — 실측값 아님):
    | 축 | 점수 |
@@ -251,7 +251,7 @@ Full 평가는 비용이 크므로 다음 조건에서만 실행한다. **단, "
 - `skills/myharness/references/loop-self-eval.md`
 - `skills/myharness/scripts/build-scorecard.sh` — **단, 이건 verdicts 기반 `loop_scorecard`(루프 효율) 계산용이지 `self_eval_scorecard`가 아니다.** 산출물 self-eval 러너는 **미구현**(별도 `run-self-eval-smoke.sh` 필요).
 - `skills/myharness/scripts/check-review-tools.sh`
-- codex/gemini 외부 리뷰 루프
+- codex/agy 외부 리뷰 루프
 
 부족한 것은 이것들을 하나의 닫힌 품질관리 루프로 연결하는 실행 규칙 + **smoke self-eval 러너(미구현)**다.
 

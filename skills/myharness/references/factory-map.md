@@ -16,7 +16,7 @@
 |------|------|------|
 | 6패턴 팀설계 · 에이전트/스킬 생성 · 오케스트레이션 | ✅ active | 코어 |
 | 내부 QA(생성-검증) · 듀얼 런타임 · 리스크 등급 · 모델 라우팅 | ✅ active | |
-| external-review-loop(수렴·원장·재리뷰) | ✅ active | codex/gemini 설치 시. `check-review-tools.sh` |
+| external-review-loop(수렴·원장·재리뷰) | ✅ active | codex/agy 설치 시. `check-review-tools.sh` |
 | `build-scorecard.sh`(loop_scorecard) | ✅ active (측정 로깅만) | 1단계. 자동 환류 없음 |
 | `run-policy-audit.sh`(팩토리 레포 정책 감사) | ✅ active | 정적·읽기전용. **팩토리 레포 자체만**(생성 하네스 아님). Phase 7-5 Step 4. warn≠block |
 | loop-self-eval 단계 3·4(제안·자동 환류) | 🧪 **실험적·비활성** | 데이터·holdout 후 |
@@ -27,7 +27,7 @@
 ```
 [생성] → [내부 QA] 같은 세션 경계면 교차검증 (모든 도메인, 점진)
             ↓ (코드/설계, 도구 있음)
-       [external-review-loop] codex/gemini 독립 → 전건 판정 → 수정 → 수렴(loop-until-dry)   ✅
+       [external-review-loop] codex/agy 독립 → 전건 판정 → 수정 → 수렴(loop-until-dry)   ✅
             ↓ (측정)
        [loop_scorecard] 루프 효율 측정·로깅 (build-scorecard.sh)                          ✅ 1단계
             ↓ (실험적)

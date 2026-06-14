@@ -46,7 +46,7 @@ Harness は Claude Code エコシステムの **L3 Meta-Factory** 層 — 他の
 - **スキル生成** — Progressive Disclosureパターンによるコンテキストの効率的管理を備えたスキルを自動生成
 - **オーケストレーション** — エージェント間のデータ受け渡し、エラーハンドリング、チーム連携プロトコルを内蔵
 - **検証体制** — トリガー検証、ドライランテスト、With-skill vs Without-skill 比較テスト
-- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：codex/gemini CLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。**収束ループ** — loop-until-dry＋ラウンド上限＋判定台帳（dedup vs seen、却下の再浮上防止）＋修正分の再レビュー。先にツール連携を点検（`check-review-tools.sh`）し、codex/geminiが無ければスキルを生成しない。
+- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：codex/agy CLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。**収束ループ** — loop-until-dry＋ラウンド上限＋判定台帳（dedup vs seen、却下の再浮上防止）＋修正分の再レビュー。先にツール連携を点検（`check-review-tools.sh`）し、codex/agyが無ければスキルを生成しない。
 - **ループ自己評価** — 各ループが `loop_scorecard.json`（alignment_score・判定カウント・正規化ラウンド・コスト・終了ラベル）を発行 → 段階的な自己改善（測定→手動レポート→提案→自動）、自己強化防止（提案のみ＋承認・ローリングウィンドウ・最小サンプル；recall は Ground Truth のみ）。詳細：`references/loop-self-eval.md`。
 - **ドクトリン注入** — 生成されたコード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入。リスク等級（軽量/標準/重大）でゲート強度を調整。
 - **デュアルランタイム（Claude Code + Codex）** — 単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。ファクトリーが `CLAUDE.md`・`AGENTS.md` ポインターを両方出力し、オーケストレーションを分岐（Claude `TeamCreate` ↔ Codex ネイティブ subagents / `codex exec`）。Phase 7 のランタイム同期で drift を防止。詳細：`references/runtime-adapters.md`。
@@ -58,7 +58,7 @@ Harness は Claude Code エコシステムの **L3 Meta-Factory** 層 — 他の
 
 - **関心の分離** — *エージェント*は「誰が」（専門家ペルソナ＋作業原則）、*スキル*は「どうやって」（手順＋ツール）。いずれもファイル（`.claude/agents/*.md`、`skills/*/SKILL.md`）でインライン禁止 → セッション横断で再利用。1エージェント＝1つの集中した役割、1エージェント↔1〜Nスキル（共有可）。
 - **エージェントチームが既定** — 2名以上はメッセージ・共有タスクリスト・`_workspace/` ファイルで自己調整。発見の共有・対立の議論・抜け漏れ補完が品質を高める。
-- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **＋** 外部独立レビューループ（codex/gemini）。オーケストレーターが全課題を実コードと照合して判定 — 合意は証拠ではない。リスク等級（軽量/標準/重大）で強度を調整。
+- **2層品質ゲート** — 内部のプロデューサー-レビューアQA **＋** 外部独立レビューループ（codex/agy）。オーケストレーターが全課題を実コードと照合して判定 — 合意は証拠ではない。リスク等級（軽量/標準/重大）で強度を調整。
 - **ドクトリン注入** — コード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入（サブエージェントはグローバル規則を継承しない）。
 - **強制ではなくWhy、DRYなポインター** — 原則は*理由*を説明し（エッジケースの判断）、単一の出典を参照（複製禁止）。
 - **進化するシステム** — フィードバックを適切な層へ（成果物→スキル、役割→エージェント、順序→オーケストレーター、トリガー→description）ルーティングし、退行防止のため履歴を記録。
@@ -149,14 +149,14 @@ my_harness/
 │       │   ├── skill-writing-guide.md     # スキル作成ガイド
 │       │   ├── skill-testing-guide.md     # テスト・評価方法論
 │       │   ├── qa-agent-guide.md          # QAエージェント統合ガイド
-│       │   ├── external-review-loop.md    # codex/gemini 外部レビューゲート（収束ループ＋テンプレート）
+│       │   ├── external-review-loop.md    # codex/agy 外部レビューゲート（収束ループ＋テンプレート）
 │       │   ├── loop-self-eval.md          # ループ scorecard（測定のみ; 3·4段階は実験的）
 │       │   ├── self-improvement-loop.md   # ベンチマーク基準の成果物改善（設計のみ）
 │       │   ├── tdd-doctrine.md            # TDDドクトリン（コードエージェント注入用）
 │       │   ├── dev-rules.md               # 開発ルール（コードエージェント注入用）
 │       │   └── runtime-adapters.md        # Claude Code / Codex デュアルランタイム設計
 │       └── scripts/
-│           ├── check-review-tools.sh      # codex/gemini 連携チェック
+│           ├── check-review-tools.sh      # codex/agy 連携チェック
 │           └── build-scorecard.sh         # verdicts から loop_scorecard 計算
 ├── AGENTS.md                       # Codex ランタイムのエントリポイント
 ├── install.sh                      # デュアルランタイムインストーラー（Claude + Codex）
@@ -312,7 +312,7 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 <details>
 <summary><b>Q2. どのランタイムをサポートしますか — Claude Code、Codex？</b></summary>
 
-**A.** 両方。myharness は **デュアルランタイム**：単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。Claude Code が主（最も自動化 — `TeamCreate` エージェントチーム）、Codex は `AGENTS.md`＋`.agents/skills/`＋ネイティブ subagents / `codex exec` で対応（`$myharness` または `/skills` で呼び出し）。詳細：`skills/myharness/references/runtime-adapters.md`。Gemini はホストランタイムではなく外部レビュー（codex/gemini）のレビュアーとして使用。
+**A.** 両方。myharness は **デュアルランタイム**：単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。Claude Code が主（最も自動化 — `TeamCreate` エージェントチーム）、Codex は `AGENTS.md`＋`.agents/skills/`＋ネイティブ subagents / `codex exec` で対応（`$myharness` または `/skills` で呼び出し）。詳細：`skills/myharness/references/runtime-adapters.md`。Gemini はホストランタイムではなく外部レビュー（codex/agy）のレビュアーとして使用。
 </details>
 
 ## ライセンス

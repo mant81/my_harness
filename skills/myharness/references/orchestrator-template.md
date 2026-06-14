@@ -310,7 +310,7 @@ wait   # 여러 개 띄운 뒤
 ### 동시성 정책 (백프레셔)
 대규모 fan-out(에이전트 7+ · 다중 codex exec)은 CPU·file I/O·API quota·토큰을 폭증시킨다.
 - **동시 실행 cap 기본 3, 최대 5** — 초과는 큐잉(`_workspace/status/*.json` claim/lease).
-- **외부 리뷰는 별도 cap 2** (codex+gemini 1쌍).
+- **외부 리뷰는 별도 cap 2** (codex+agy 1쌍).
 - 각 subprocess는 PID 수집·exit code 확인·실패 1회 재시도·잔여 kill.
 
 ### 에러 핸들링

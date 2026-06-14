@@ -25,7 +25,7 @@
 | 설정 | settings.json | `.codex/config.toml`(프로젝트, trusted) + `~/.codex/config.toml` | 🟡 |
 | MCP | settings/플러그인 | `config.toml`의 `mcp_servers.<id>` | ✅ |
 | 커스텀 슬래시 | `commands/*.md` | ❌ `~/.codex/prompts/*.md`·`$ARGUMENTS` 0.137.0 미지원 | 🔴 생략 |
-| 외부 리뷰(codex/gemini 호출) | subprocess | subprocess (동일) | ✅ 공짜 |
+| 외부 리뷰(codex/agy 호출) | subprocess | subprocess (동일) | ✅ 공짜 |
 | 스크립트(scripts/) | bash | bash | ✅ |
 
 핵심: 스킬 본문은 **포맷 동일** → 거의 그대로 공유. 진짜 변환이 필요한 건 에이전트 정의(md→toml)와 오케스트레이션뿐.
@@ -55,7 +55,7 @@
 ## 6. 설치 방법
 - **Claude Code:** 플러그인 추가(`/plugin` 또는 marketplace.json). `skills/` 자동 인식.
 - **Codex:** 레포 루트 `AGENTS.md`·`.agents/skills/`·`.codex/`는 trusted 프로젝트에서 자동 인식 — 별도 설치 최소. MCP는 `.codex/config.toml`에 동봉(trusted 한정, auth/telemetry 등 machine-local 키는 project-local 무시됨).
-- 양쪽 자동화는 레포 루트 `install.sh` 참조. codex/gemini는 `check-review-tools.sh`로 점검.
+- 양쪽 자동화는 레포 루트 `install.sh` 참조. codex/agy는 `check-review-tools.sh`로 점검.
 
 ## 7. 한계 (정직)
 - **커스텀 슬래시 프롬프트는 Codex 0.137.0 미지원** — Claude의 `commands/`에 1:1 대응 없음(애초에 하네스는 커맨드 안 만드니 영향 작음).
