@@ -46,10 +46,11 @@ Harness lives at the **L3 Meta-Factory** layer of the Claude Code ecosystem — 
 - **Skill Generation** — Auto-generates skills with Progressive Disclosure for efficient context management
 - **Orchestration** — Inter-agent data passing, error handling, and team coordination protocols
 - **Validation** — Trigger verification, dry-run testing, and with-skill vs without-skill comparison tests
-- **Two-Layer Quality Gate** — Internal Producer-Reviewer QA **plus** an external independent review loop (`external-review-loop`): codex/agy CLIs review each stage's deliverable, the orchestrator adjudicates every issue against real code (confirm/partial/defer/reject), and only confirmed issues are fixed via TDD. It is a **convergent loop** — loop-until-dry with a round cap, a verdicts ledger (dedup vs seen) so rejected issues don't resurface, and re-review of its own fixes. Tool availability is checked first (`check-review-tools.sh`) so the skill is skipped when codex/agy are absent.
+- **Two-Layer Quality Gate** — Internal Producer-Reviewer QA **plus** an external independent review loop (`external-review-loop`): independent reviewer CLIs review each stage's deliverable, the orchestrator adjudicates every issue against real code (confirm/partial/defer/reject), and only confirmed issues are fixed via TDD. Reviewers are chosen for **engine diversity** — the runner's own engine is excluded so an AI never reviews its own blind spots (Claude Code → codex + agy; Codex → claude + agy). It is a **convergent loop** — loop-until-dry with a round cap, a verdicts ledger (dedup vs seen) so rejected issues don't resurface, and re-review of its own fixes. Tool availability is checked first (`check-review-tools.sh`, emitting the runner-excluded `REVIEWERS:` set) so skill generation is skipped when no external reviewer is available.
 - **Loop Self-Evaluation** — each loop emits a `loop_scorecard.json` (alignment_score, verdict counts, normalized rounds, cost, termination label) for a staged self-improvement path (measure → manual report → propose → auto), with anti-Goodhart guards (propose-only + approval, rolling window, min-samples; recall measured only against ground truth). See `references/loop-self-eval.md`.
 - **Doctrine Injection** — Generated code/modification agents get TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine injected by real path, with risk-tiered gate strength (light / standard / critical).
 - **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/myharness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`), with a Phase-7 runtime-sync step to prevent drift. See `references/runtime-adapters.md`.
+- **Built-Harness Update (Claude `/myharness update` · Codex `$myharness update`)** — After a plugin update, re-propagates factory doctrine/scripts to an already-built harness while **protecting your local edits from being overwritten**. A `.harness-manifest.json` baseline (recorded at generation) lets `harness-update.sh` classify each file by hash — SAME / UPDATABLE (auto) / USER-MODIFIED (held back; overwritten with canonical only on explicit approval, no partial merge) / UNKNOWN (conservative, manifest missing) / NEW. Add your own rules in a `*.local.*` file to stay update-safe. See `references/harness-update.md`.
 - **Cost & Concurrency Control** — model routing (high-reasoning → `opus`, simple tasks → light models), concurrency caps with backpressure (default 3 / max 5), external-review budget (skip-when-no-delta, `.fast-pass`), and smoke/full test modes keep large fan-outs affordable. Portable tooling (`timeout`/`gtimeout` detection, process cleanup).
 
 
@@ -59,7 +60,7 @@ A generated harness separates **who** from **how**, and treats itself as an evol
 
 - **Separation of concerns** — an *agent* is the "who" (expert persona + working principles), a *skill* is the "how" (procedure + bundled tools). Both are files (`.claude/agents/*.md`, `skills/*/SKILL.md`), never inline — reusable across sessions. One agent = one focused role; one agent uses 1–N skills (sharing allowed).
 - **Agent teams by default** — 2+ collaborators self-coordinate via messages, a shared task list, and files under `_workspace/`. Discovery-sharing, conflict debate, and gap-filling raise quality.
-- **Two-layer quality gate** — internal Producer-Reviewer QA **plus** an external independent review loop (codex/agy). The orchestrator adjudicates every issue against real code — consensus is not proof. Gate strength is risk-tiered (light / standard / critical).
+- **Two-layer quality gate** — internal Producer-Reviewer QA **plus** an external independent review loop (engine-diverse reviewers, runner engine excluded). The orchestrator adjudicates every issue against real code — consensus is not proof. Gate strength is risk-tiered (light / standard / critical).
 - **Doctrine injection** — code/modification agents receive TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine by real path (subagents don't inherit global rules).
 - **Why over command, DRY pointers** — principles explain *why* (so agents judge edge cases) and reference a single source instead of duplicating it.
 - **Evolving system** — feedback routes to the right layer (output → skill, role → agent, order → orchestrator, trigger → description) and is logged for regression safety.
@@ -135,15 +136,17 @@ my_harness/
 │       │   ├── skill-writing-guide.md     # Skill authoring guide
 │       │   ├── skill-testing-guide.md     # Testing & evaluation methodology
 │       │   ├── qa-agent-guide.md          # QA agent integration guide
-│       │   ├── external-review-loop.md    # codex/agy external review gate (convergent loop + template)
+│       │   ├── external-review-loop.md    # external review gate, engine-diverse (convergent loop + template)
 │       │   ├── loop-self-eval.md          # loop scorecard (measure-only; stages 3-4 experimental)
 │       │   ├── self-improvement-loop.md   # benchmark-anchored artifact improvement (design only)
 │       │   ├── tdd-doctrine.md            # TDD doctrine (injected into code agents)
 │       │   ├── dev-rules.md               # Development rules (injected into code agents)
-│       │   └── runtime-adapters.md        # Claude Code / Codex dual-runtime design
+│       │   ├── runtime-adapters.md        # Claude Code / Codex dual-runtime design
+│       │   └── harness-update.md          # built-harness update (preserve local edits)
 │       └── scripts/
-│           ├── check-review-tools.sh      # codex/agy availability check
-│           └── build-scorecard.sh         # compute loop_scorecard from verdicts
+│           ├── check-review-tools.sh      # reviewer availability check (runner-excluded)
+│           ├── build-scorecard.sh         # compute loop_scorecard from verdicts
+│           └── harness-update.sh          # update built harness (manifest/plan/apply)
 ├── AGENTS.md                       # Codex runtime entry point
 ├── install.sh                      # Dual-runtime installer (Claude + Codex)
 └── README.md
@@ -304,7 +307,7 @@ Harness is not alone in the Claude Code / agent-framework ecosystem. The followi
 <details>
 <summary><b>Q2. Which runtimes are supported — Claude Code, Codex?</b></summary>
 
-**A.** Both. myharness is **dual-runtime**: one source of truth (`skills/myharness/`) with thin per-runtime adapters. Claude Code is the primary/most-automated runtime (agent teams via `TeamCreate`); Codex is supported via `AGENTS.md` + `.agents/skills/` + native subagents / `codex exec` (invoke with `$myharness` or `/skills`). See `skills/myharness/references/runtime-adapters.md`. Gemini is used as an external review reviewer (codex/agy), not as a host runtime.
+**A.** Both. myharness is **dual-runtime**: one source of truth (`skills/myharness/`) with thin per-runtime adapters. Claude Code is the primary/most-automated runtime (agent teams via `TeamCreate`); Codex is supported via `AGENTS.md` + `.agents/skills/` + native subagents / `codex exec` (invoke with `$myharness` or `/skills`). See `skills/myharness/references/runtime-adapters.md`. Gemini is used as an external review reviewer (via agy), not as a host runtime.
 </details>
 
 ## License
