@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`/myharness update` (빌드된 하네스 동기화)** — 팩토리 정본을 고친 뒤 이미 빌드된 하네스(생성 산출물)에 재전파. **사용자 수정 보존**(해시 감지 + propose): 생성 시 `.harness-manifest.json` 기준선 기록 → update가 파일별로 SAME/UPDATABLE(자동)/USER-MODIFIED(승인)/NEW 분류. `scripts/harness-update.sh`(manifest/plan/apply) + `references/harness-update.md`. 사용자 정책은 `*.local.*` 분리 권장(관리 제외). 관리 대상 v1: dev-rules·tdd-doctrine 교리 + check-review-tools·build-scorecard 스크립트.
+
+### Changed
+
+- **외부 리뷰 — 런타임별 리뷰어(엔진 독립성)** — 외부 리뷰어를 러너 엔진과 다른 엔진으로 선택(독립성 = 엔진 다양성). Claude Code → `codex`+`agy`, Codex → `claude`+`agy`. `check-review-tools.sh`에 `claude` 탐지·런타임 감지·러너 제외 `REVIEWERS:` 산출·runner 값 검증 추가. Step 4-6 생성 조건을 `AVAILABLE`→`REVIEWERS` 기준으로 전환.
+- **개발 규칙(dev-rules) 보강** — 주입 교리에 의존성 신중(§5)·추측성 아키텍처 금지(§6)·질문 절제(§1) 규칙 추가.
+
 ## [1.0.0] - 2026-06-10
 
 ### Added
