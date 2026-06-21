@@ -1,6 +1,6 @@
 # Experimental Flag Dependency
 
-> **Status:** Active · **Owner:** cookyman · **Last updated:** 2026-04-18 · **SLA:** See [Monitoring Commitment](#monitoring-commitment)
+> **Status:** Active · **Owner:** cookyman · **Last updated:** 2026-06-21 · **SLA:** See [Monitoring Commitment](#monitoring-commitment)
 
 This document explains why `harness` requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, the three plausible futures of that flag, and what this repository will do in each case — with time-boxed commitments so enterprise adopters can plan against it.
 
@@ -10,14 +10,16 @@ This document explains why `harness` requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TE
 
 ### Why the flag is required
 
-`harness` is a meta-skill factory built on top of Claude Code's **Agent Teams API**. Three Claude Code primitives are invoked internally whenever a user runs `claude "build a harness for <domain>"`:
+`harness` is a meta-skill factory built on top of Claude Code's **Agent Teams** feature. The primitives invoked internally whenever a user runs `claude "build a harness for <domain>"`:
 
 | Primitive | Purpose | Flag gated? |
 |-----------|---------|-------------|
-| `TeamCreate` | Instantiates a multi-agent team with shared context | **Yes** |
-| `SendMessage` | Routes messages between team members (supervisor ↔ worker) | **Yes** |
-| `TaskCreate` | Spawns long-running subtasks inside a team | **Yes** |
-| `Agent` tool (invoke) | Single-agent dispatch | No (GA) |
+| `Agent` tool (teammate spawn) | Spawns a teammate into the session team | Team behavior: **Yes** |
+| `SendMessage` | Routes messages between team members (teammate ↔ teammate / lead) | **Yes** |
+| `TaskCreate` | Shared task list for self-coordination inside a team | **Yes** |
+| `Agent` tool (subagent) | Single-agent dispatch (no team) | No (GA) |
+
+> **Update (2026-06-21 · Claude Code v2.1.178):** The standalone `TeamCreate` and `TeamDelete` tools **no longer exist** — agent teams no longer need a setup/teardown step. Teammates are now spawned directly via the `Agent` tool (the `team_name` input is accepted but ignored), and cleanup happens automatically on session exit. This is **Scenario A/C below, realized**: the team primitives changed shape while the `EXPERIMENTAL_AGENT_TEAMS` flag itself remains required for team behavior. `SendMessage` / `TaskCreate` are unchanged and still flag-gated. Repo references updated on branch `fix/teamcreate-removed-agent-tool`.
 
 All three flag-gated primitives require:
 
@@ -41,11 +43,12 @@ The design rationale and roadmap for this flag live in three Anthropic Engineeri
 
 ```
 myharness (v1.0.0)
-  └── Agent Teams API (Claude Code)
-        ├── TeamCreate            ← EXPERIMENTAL_AGENT_TEAMS=1
-        ├── SendMessage           ← EXPERIMENTAL_AGENT_TEAMS=1
-        ├── TaskCreate            ← EXPERIMENTAL_AGENT_TEAMS=1
-        └── Agent (invoke)        ← GA (flag-independent)
+  └── Agent Teams (Claude Code)
+        ├── Agent tool (teammate spawn)  ← team behavior: EXPERIMENTAL_AGENT_TEAMS=1
+        ├── SendMessage                  ← EXPERIMENTAL_AGENT_TEAMS=1
+        ├── TaskCreate                   ← EXPERIMENTAL_AGENT_TEAMS=1
+        └── Agent tool (subagent)        ← GA (flag-independent)
+        # TeamCreate / TeamDelete removed in v2.1.178 (no setup/teardown step)
               └── Anthropic Roadmap
                     ├── Scenario A: Flag removed (GA promotion)
                     ├── Scenario B: Managed Agents GA (parallel path)
@@ -96,7 +99,7 @@ Each scenario lists the **detection trigger** (how we will know it happened), th
 
 ### Scenario C — Breaking change (API signature mutation)
 
-**Trigger detection:** Nightly CI (`.github/workflows/nightly-compat.yml`, tracked as roadmap P-13) fails against Claude Code's latest nightly build **or** the Changelog announces a renamed env var / changed `TeamCreate` signature.
+**Trigger detection:** Nightly CI (`.github/workflows/nightly-compat.yml`, tracked as roadmap P-13) fails against Claude Code's latest nightly build **or** the Changelog announces a renamed env var / a changed Agent Teams primitive (e.g., `Agent` teammate-spawn behavior, or a `SendMessage` / `TaskCreate` contract change).
 
 **Probability (subjective):** Medium. Experimental APIs are renamed without deprecation windows.
 
@@ -133,7 +136,7 @@ We commit to the following **observable SLA**. Missing it is grounds for filing 
 ### Q1. We're in a regulated industry (finance, healthcare, public sector) and can't enable `EXPERIMENTAL` flags in production. How do we adopt harness?
 
 **Cause:** Many compliance frameworks (SOC 2 Type II, ISO 27001, K-ISMS) disallow unstable / preview features in production.
-**Action:** Use harness **design-time only**: run it in a sandbox workstation to scaffold `.claude/agents/` and `.claude/skills/` files, then commit the generated artifacts into your production repo. Production Claude Code never needs the flag — only the flag-gated `TeamCreate` runtime does. The generated single-agent skills are GA-path compatible.
+**Action:** Use harness **design-time only**: run it in a sandbox workstation to scaffold `.claude/agents/` and `.claude/skills/` files, then commit the generated artifacts into your production repo. Production Claude Code never needs the flag — only the flag-gated agent-team runtime does. The generated single-agent skills are GA-path compatible.
 
 ### Q2. If Agent Teams goes GA (Scenario A), will my existing harness-generated code break?
 

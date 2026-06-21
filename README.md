@@ -49,7 +49,7 @@ Harness lives at the **L3 Meta-Factory** layer of the Claude Code ecosystem — 
 - **Two-Layer Quality Gate** — Internal Producer-Reviewer QA **plus** an external independent review loop (`external-review-loop`): independent reviewer CLIs review each stage's deliverable, the orchestrator adjudicates every issue against real code (confirm/partial/defer/reject), and only confirmed issues are fixed via TDD. Reviewers are chosen for **engine diversity** — the runner's own engine is excluded so an AI never reviews its own blind spots (Claude Code → codex + agy; Codex → claude + agy). It is a **convergent loop** — loop-until-dry with a round cap, a verdicts ledger (dedup vs seen) so rejected issues don't resurface, and re-review of its own fixes. Tool availability is checked first (`check-review-tools.sh`, emitting the runner-excluded `REVIEWERS:` set) so skill generation is skipped when no external reviewer is available.
 - **Loop Self-Evaluation** — each loop emits a `loop_scorecard.json` (alignment_score, verdict counts, normalized rounds, cost, termination label) for a staged self-improvement path (measure → manual report → propose → auto), with anti-Goodhart guards (propose-only + approval, rolling window, min-samples; recall measured only against ground truth). See `references/loop-self-eval.md`.
 - **Doctrine Injection** — Generated code/modification agents get TDD (`tdd-doctrine.md`) and development-rules (`dev-rules.md`) doctrine injected by real path, with risk-tiered gate strength (light / standard / critical).
-- **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/myharness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude `TeamCreate` ↔ Codex native subagents / `codex exec`), with a Phase-7 runtime-sync step to prevent drift. See `references/runtime-adapters.md`.
+- **Dual Runtime (Claude Code + Codex)** — One source of truth (`skills/myharness/`), thin per-runtime adapters. The factory emits both `CLAUDE.md` and `AGENTS.md` pointers and adapts orchestration (Claude agent teams via the `Agent` tool ↔ Codex native subagents / `codex exec`), with a Phase-7 runtime-sync step to prevent drift. See `references/runtime-adapters.md`.
 - **Built-Harness Update (Claude `/myharness update` · Codex `$myharness update`)** — After a plugin update, re-propagates factory doctrine/scripts to an already-built harness while **protecting your local edits from being overwritten**. A `.harness-manifest.json` baseline (recorded at generation) lets `harness-update.sh` classify each file by hash — SAME / UPDATABLE (auto) / USER-MODIFIED (held back; overwritten with canonical only on explicit approval, no partial merge) / UNKNOWN (conservative, manifest missing) / NEW. Add your own rules in a `*.local.*` file to stay update-safe. See `references/harness-update.md`.
 - **Cost & Concurrency Control** — model routing (high-reasoning → `opus`, simple tasks → light models), concurrency caps with backpressure (default 3 / max 5), external-review budget (skip-when-no-delta, `.fast-pass`), and smoke/full test modes keep large fan-outs affordable. Portable tooling (`timeout`/`gtimeout` detection, process cleanup).
 
@@ -166,7 +166,7 @@ Set up a harness
 
 | Mode | Description | Recommended For |
 |------|-------------|-----------------|
-| **Agent Teams** (default) | TeamCreate + SendMessage + TaskCreate | 2+ agents requiring collaboration |
+| **Agent Teams** (default) | Agent tool (spawn teammates) + SendMessage + TaskCreate | 2+ agents requiring collaboration |
 | **Subagents** | Direct Agent tool invocation | One-off tasks, no inter-agent communication needed |
 
 <p align="center">
@@ -307,7 +307,7 @@ Harness is not alone in the Claude Code / agent-framework ecosystem. The followi
 <details>
 <summary><b>Q2. Which runtimes are supported — Claude Code, Codex?</b></summary>
 
-**A.** Both. myharness is **dual-runtime**: one source of truth (`skills/myharness/`) with thin per-runtime adapters. Claude Code is the primary/most-automated runtime (agent teams via `TeamCreate`); Codex is supported via `AGENTS.md` + `.agents/skills/` + native subagents / `codex exec` (invoke with `$myharness` or `/skills`). See `skills/myharness/references/runtime-adapters.md`. Gemini is used as an external review reviewer (via agy), not as a host runtime.
+**A.** Both. myharness is **dual-runtime**: one source of truth (`skills/myharness/`) with thin per-runtime adapters. Claude Code is the primary/most-automated runtime (agent teams via the `Agent` tool); Codex is supported via `AGENTS.md` + `.agents/skills/` + native subagents / `codex exec` (invoke with `$myharness` or `/skills`). See `skills/myharness/references/runtime-adapters.md`. Gemini is used as an external review reviewer (via agy), not as a host runtime.
 </details>
 
 ## License

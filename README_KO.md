@@ -49,7 +49,7 @@ Harness는 Claude Code 생태계의 **L3 Meta-Factory** 층 — 다른 하네스
 - **2층 품질 게이트** — 내부 생성-검증 QA **+** 외부 독립 리뷰 루프(`external-review-loop`): 독립 리뷰어 CLI가 단계 산출물을 리뷰하고, 오케스트레이터가 실코드 대조로 전건 판정(확인/부분/이월/기각) 후 확인분만 TDD로 수정. 리뷰어는 **엔진 다양성**으로 선택 — 러너 자신의 엔진은 제외해 AI가 자기 맹점을 자기가 리뷰하지 못하게 한다(Claude Code → codex + agy; Codex → claude + agy). **수렴 루프** — loop-until-dry + 라운드 상한 + 판정 원장(dedup vs seen, 기각 재부상 방지) + 수정본 재리뷰. 도구 연동을 먼저 점검(`check-review-tools.sh`가 러너 제외 `REVIEWERS:` 산출)해 외부 리뷰어가 없으면 스킬을 생성하지 않음.
 - **루프 자체 평가** — 각 루프가 `loop_scorecard.json`(alignment_score·판정 카운트·정규화 라운드·비용·종료 라벨) 발행 → 단계적 자기개선(측정→수동 리포트→제안→자동), 자기강화 방지장치(제안만+승인·롤링윈도우·최소 표본; recall은 Ground Truth로만). 상세: `references/loop-self-eval.md`.
 - **교리 주입** — 생성된 코드/수정 에이전트에 TDD(`tdd-doctrine.md`)·개발 규칙(`dev-rules.md`)을 실경로로 주입. 리스크 등급(경량/표준/중대)으로 게이트 강도 조절.
-- **듀얼 런타임 (Claude Code + Codex)** — 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. 팩토리가 `CLAUDE.md`·`AGENTS.md` 포인터를 둘 다 출력하고 오케스트레이션을 분기(Claude `TeamCreate` ↔ Codex 네이티브 subagents / `codex exec`). Phase 7 런타임 동기화로 drift 방지. 상세: `references/runtime-adapters.md`.
+- **듀얼 런타임 (Claude Code + Codex)** — 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. 팩토리가 `CLAUDE.md`·`AGENTS.md` 포인터를 둘 다 출력하고 오케스트레이션을 분기(Claude 에이전트 팀 — `Agent` 도구 ↔ Codex 네이티브 subagents / `codex exec`). Phase 7 런타임 동기화로 drift 방지. 상세: `references/runtime-adapters.md`.
 - **빌드된 하네스 업데이트 (Claude `/myharness update` · Codex `$myharness update`)** — 플러그인 최신화 후, 팩토리 교리/스크립트를 이미 빌드된 하네스에 재전파하되 **로컬 수정을 덮어쓰기로부터 보호**한다. 생성 시 기록한 `.harness-manifest.json` 기준선으로 `harness-update.sh`가 파일별 해시 분류 — SAME / UPDATABLE(자동) / USER-MODIFIED(기본 보류; 명시 승인 시 정본으로 통째 교체, 부분 병합 없음) / UNKNOWN(보수 — manifest 없음) / NEW. 추가 규칙은 `*.local.*` 파일로 분리하면 update-safe. 상세: `references/harness-update.md`.
 - **비용·동시성 통제** — 모델 라우팅(고추론 → `opus`, 단순 작업 → 경량 모델), 동시성 cap+백프레셔(기본 3·최대 5), 외부 리뷰 예산(skip-when-no-delta·`.fast-pass`), smoke/full 테스트 모드로 대규모 fan-out 비용 억제. 이식성 도구(`timeout`/`gtimeout` 탐지·프로세스 정리).
 
@@ -180,7 +180,7 @@ Claude Code에서 다음과 같이 트리거한다:
 
 | 모드 | 설명 | 권장 상황 |
 |------|------|----------|
-| **에이전트 팀** (기본) | TeamCreate + SendMessage + TaskCreate | 2개 이상 에이전트, 협업 필요 |
+| **에이전트 팀** (기본) | Agent 도구(팀원 spawn) + SendMessage + TaskCreate | 2개 이상 에이전트, 협업 필요 |
 | **서브 에이전트** | Agent 도구 직접 호출 | 단발성 작업, 통신 불필요 |
 
 <p align="center">
@@ -308,7 +308,7 @@ Harness는 Claude Code / 에이전트 프레임워크 생태계에서 혼자가 
 <details>
 <summary><b>Q2. 어떤 런타임을 지원하나요 — Claude Code, Codex?</b></summary>
 
-**A.** 둘 다. myharness는 **듀얼 런타임**입니다: 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. Claude Code가 주(가장 자동화됨 — `TeamCreate` 에이전트 팀), Codex는 `AGENTS.md` + `.agents/skills/` + 네이티브 subagents / `codex exec`로 지원(`$myharness` 또는 `/skills`로 호출). 상세: `skills/myharness/references/runtime-adapters.md`. Gemini는 호스트 런타임이 아니라 외부 리뷰(agy 경유) 리뷰어로 사용.
+**A.** 둘 다. myharness는 **듀얼 런타임**입니다: 단일 출처(`skills/myharness/`) + 런타임별 얇은 어댑터. Claude Code가 주(가장 자동화됨 — `Agent` 도구 에이전트 팀), Codex는 `AGENTS.md` + `.agents/skills/` + 네이티브 subagents / `codex exec`로 지원(`$myharness` 또는 `/skills`로 호출). 상세: `skills/myharness/references/runtime-adapters.md`. Gemini는 호스트 런타임이 아니라 외부 리뷰(agy 경유) 리뷰어로 사용.
 </details>
 
 ## 라이선스

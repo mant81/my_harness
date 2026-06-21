@@ -49,7 +49,7 @@ Harness は Claude Code エコシステムの **L3 Meta-Factory** 層 — 他の
 - **2層品質ゲート** — 内部のプロデューサー-レビューアQA **に加え** 外部独立レビューループ（`external-review-loop`）：独立レビューアCLIが各段階の成果物をレビューし、オーケストレーターが実コードと照合して全件判定（確認/部分/繰越/却下）、確認分のみTDDで修正。レビューアは**エンジン多様性**で選ぶ — ランナー自身のエンジンを除外し、AIが自分の盲点を自分でレビューしないようにする（Claude Code → codex + agy；Codex → claude + agy）。**収束ループ** — loop-until-dry＋ラウンド上限＋判定台帳（dedup vs seen、却下の再浮上防止）＋修正分の再レビュー。先にツール連携を点検（`check-review-tools.sh` がランナー除外の `REVIEWERS:` を出力）し、外部レビューアが無ければスキルを生成しない。
 - **ループ自己評価** — 各ループが `loop_scorecard.json`（alignment_score・判定カウント・正規化ラウンド・コスト・終了ラベル）を発行 → 段階的な自己改善（測定→手動レポート→提案→自動）、自己強化防止（提案のみ＋承認・ローリングウィンドウ・最小サンプル；recall は Ground Truth のみ）。詳細：`references/loop-self-eval.md`。
 - **ドクトリン注入** — 生成されたコード/修正エージェントにTDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を実パスで注入。リスク等級（軽量/標準/重大）でゲート強度を調整。
-- **デュアルランタイム（Claude Code + Codex）** — 単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。ファクトリーが `CLAUDE.md`・`AGENTS.md` ポインターを両方出力し、オーケストレーションを分岐（Claude `TeamCreate` ↔ Codex ネイティブ subagents / `codex exec`）。Phase 7 のランタイム同期で drift を防止。詳細：`references/runtime-adapters.md`。
+- **デュアルランタイム（Claude Code + Codex）** — 単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。ファクトリーが `CLAUDE.md`・`AGENTS.md` ポインターを両方出力し、オーケストレーションを分岐（Claude エージェントチーム — `Agent` ツール ↔ Codex ネイティブ subagents / `codex exec`）。Phase 7 のランタイム同期で drift を防止。詳細：`references/runtime-adapters.md`。
 - **ビルド済みハーネスの更新（Claude `/myharness update` · Codex `$myharness update`）** — プラグイン更新後、ファクトリーのドクトリン/スクリプトを既にビルド済みのハーネスへ再伝播しつつ、**ローカルの編集を上書きから保護**する。生成時に記録した `.harness-manifest.json` のベースラインで `harness-update.sh` がファイルごとにハッシュ分類 — SAME / UPDATABLE（自動）/ USER-MODIFIED（既定は保留；明示的な承認時に正本へ丸ごと置換、部分マージなし）/ UNKNOWN（保守 — manifest なし）/ NEW。独自ルールは `*.local.*` ファイルに分離すれば update-safe。詳細：`references/harness-update.md`。
 - **コスト・並行性の制御** — モデルルーティング（高推論 → `opus`、単純タスク → 軽量モデル）、並行数上限＋バックプレッシャー（既定 3・最大 5）、外部レビュー予算（skip-when-no-delta・`.fast-pass`）、smoke/full テストモードで大規模ファンアウトのコストを抑制。移植性ツール（`timeout`/`gtimeout` 検出・プロセス整理）。
 
@@ -180,7 +180,7 @@ Set up a harness
 
 | モード | 説明 | 推奨ケース |
 |--------|------|------------|
-| **Agent Teams**（デフォルト） | TeamCreate + SendMessage + TaskCreate | エージェント2名以上、コラボレーションが必要な場合 |
+| **Agent Teams**（デフォルト） | Agent ツール（teammate spawn） + SendMessage + TaskCreate | エージェント2名以上、コラボレーションが必要な場合 |
 | **サブエージェント** | Agentツール直接呼び出し | 単発タスク、エージェント間通信不要の場合 |
 
 <p align="center">
@@ -315,7 +315,7 @@ Harness は Claude Code / エージェントフレームワークのエコシス
 <details>
 <summary><b>Q2. どのランタイムをサポートしますか — Claude Code、Codex？</b></summary>
 
-**A.** 両方。myharness は **デュアルランタイム**：単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。Claude Code が主（最も自動化 — `TeamCreate` エージェントチーム）、Codex は `AGENTS.md`＋`.agents/skills/`＋ネイティブ subagents / `codex exec` で対応（`$myharness` または `/skills` で呼び出し）。詳細：`skills/myharness/references/runtime-adapters.md`。Gemini はホストランタイムではなく外部レビュー（agy 経由）のレビュアーとして使用。
+**A.** 両方。myharness は **デュアルランタイム**：単一の出典（`skills/myharness/`）＋ランタイム別の薄いアダプター。Claude Code が主（最も自動化 — `Agent` ツールのエージェントチーム）、Codex は `AGENTS.md`＋`.agents/skills/`＋ネイティブ subagents / `codex exec` で対応（`$myharness` または `/skills` で呼び出し）。詳細：`skills/myharness/references/runtime-adapters.md`。Gemini はホストランタイムではなく外部レビュー（agy 経由）のレビュアーとして使用。
 </details>
 
 ## ライセンス

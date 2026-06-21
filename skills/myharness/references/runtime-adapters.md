@@ -20,7 +20,7 @@
 | 인스트럭션 | `CLAUDE.md` | `AGENTS.md` (글로벌 `~/.codex` → 레포 루트→cwd concat, **가까운 쪽 우선**, 32KiB cap) | ✅ 듀얼 출력 |
 | 스킬 | `.claude/skills/{n}/SKILL.md` (desc 자동 트리거) | `.agents/skills/{n}/SKILL.md` (desc 기반 implicit activation, `/skills`·`$name` 명시) | ✅ **포맷 동일** |
 | 에이전트 정의 | `.claude/agents/{n}.md` | `.codex/agents/{n}.toml` (커스텀) + 내장 `default`/`worker`/`explorer` | 🟡 포맷 변환(md→toml) |
-| 멀티 에이전트 | `TeamCreate`/`SendMessage`/`TaskCreate` | **네이티브 subagents**(병렬 spawn) 또는 `codex exec` subprocess | 🟡 어댑터 |
+| 멀티 에이전트 | `Agent`(팀원 spawn)/`SendMessage`/`TaskCreate` | **네이티브 subagents**(병렬 spawn) 또는 `codex exec` subprocess | 🟡 어댑터 |
 | 플러그인/배포 | `.claude-plugin/plugin.json` + marketplace | 플러그인 번들(skills+commands+MCP+hooks+marketplace) | 🟡 별도 매니페스트 |
 | 설정 | settings.json | `.codex/config.toml`(프로젝트, trusted) + `~/.codex/config.toml` | 🟡 |
 | MCP | settings/플러그인 | `config.toml`의 `mcp_servers.<id>` | ✅ |
@@ -40,7 +40,7 @@
 
 ## 4. 오케스트레이션 어댑터
 오케스트레이터 상단에 "런타임 감지 후 분기" 명시.
-- **Claude Code:** `TeamCreate`+`SendMessage`+`TaskCreate` (템플릿 A).
+- **Claude Code:** `Agent`(팀원 spawn)+`SendMessage`+`TaskCreate` (템플릿 A). 구 `TeamCreate`/`TeamDelete`는 v2.1.178에서 제거 — setup·teardown 단계 없음, 세션 종료 시 자동 정리.
 - **Codex:** 네이티브 subagents로 병렬 specialized agents spawn(`/agent` 전환, `.codex/agents/*.toml`), 또는 독립 병렬이 필요하면 `codex exec` subprocess. 데이터는 `_workspace/` 파일 기반(템플릿 D).
   - `codex exec` 베스트 프랙티스(검증): 기본 read-only / 쓰기 작업만 `--sandbox workspace-write` / 스크립트 소비는 `--json` / 최종 메시지만 `-o`(`--output-last-message`) / 격리는 `--ignore-user-config` / stdin은 `< /dev/null`.
 - external-review-loop 게이트는 양쪽 subprocess로 동일하나, **리뷰어 집합은 러너 엔진을 제외**한다(독립성 = 엔진 다양성). `check-review-tools.sh [runner]`가 `REVIEWERS:` 줄로 러너 제외분을 산출 — Claude Code면 `codex+agy`, Codex면 `claude+agy`. 상세: `external-review-loop.md` 독립성 절·Step 2.

@@ -10,7 +10,7 @@
 
 ### 에이전트 팀 (Agent Teams) — 기본 모드
 
-팀 리더가 `TeamCreate`로 팀을 구성하고, 팀원들은 독립적인 Claude Code 인스턴스로 실행된다. 팀원들은 `SendMessage`로 직접 통신하고, 공유 작업 목록(`TaskCreate`/`TaskUpdate`)으로 자체 조율한다.
+팀 리더가 `Agent` 도구로 팀원을 spawn하고(별도 팀 생성 단계 없음), 팀원들은 독립적인 Claude Code 인스턴스로 실행된다. 팀원들은 `SendMessage`로 직접 통신하고, 공유 작업 목록(`TaskCreate`/`TaskUpdate`)으로 자체 조율한다.
 
 ```
 [리더] ←→ [팀원A] ←→ [팀원B]
@@ -19,7 +19,7 @@
 ```
 
 **핵심 도구:**
-- `TeamCreate`: 팀 생성 + 팀원 스폰
+- `Agent`(팀원 spawn): 팀원 생성 — 구 `TeamCreate`/`TeamDelete`는 v2.1.178에서 제거됨(setup·teardown 단계 없음, 세션 종료 시 자동 정리)
 - `SendMessage({to: name})`: 특정 팀원에게 메시지
 - `SendMessage({to: "all"})`: 브로드캐스트 (비용 높음, 드물게)
 - `TaskCreate`/`TaskUpdate`: 공유 작업 목록 관리
@@ -32,10 +32,18 @@
 - 계획 승인 모드로 위험한 작업 전 검토 가능
 
 **제약:**
-- 세션당 한 팀만 **활성화** 가능 (단, Phase 간에 팀을 해체하고 새 팀 구성은 가능)
+- 세션당 한 팀만 **활성화** 가능 (단, Phase 간에 팀원을 종료하고 새 팀원 spawn은 가능)
 - 중첩 팀 불가 (팀원이 자신의 팀 생성 불가)
 - 리더 고정 (이전 불가)
 - 토큰 비용 높음
+
+**알려진 한계·안정성 경고 (experimental — Claude Code v2.1.178 기준. 출처: 공식 agent-teams docs + GitHub issues):**
+- **세션 resume 미복원** — `/resume`·`/rewind`는 in-process 팀원을 복원하지 않는다. → 하네스는 중간 산출물을 `_workspace/`에 체크포인트로 남겨 새 세션에서 이어가도록 설계한다(`--resume`에 의존 금지 — 이미 본 팩토리의 기본 설계).
+- **task status lag** — 팀원이 완료를 표시 못 해 의존 작업이 막힐 수 있다. → 상태 표시에만 의존하지 말고 `SendMessage` 완료 보고를 요구한다.
+- **shutdown·자동 정리 불완전 (특히 tmux/split-pane 모드)** — 종료 시그널 누락으로 고아 프로세스·잔여 tmux 페인이 남을 수 있다. shutdown은 협조 요청이라 팀원이 거부·지연할 수 있다. → 종료 시 명시적 shutdown을 요청하고, tmux 모드면 `tmux ls`로 잔여 세션을 확인·정리. 기본 in-process 모드는 영향 작음.
+- **토큰 비용·spawn 지연** — 팀원 각자가 독립 Claude 인스턴스라 비용·초기 지연이 크고, 프롬프트 캐시 미스 시 비용이 급증할 수 있다. → 가벼운/단일 도메인/병렬 통신 불필요 작업은 **서브 에이전트 모드로 전환**(아래 의사결정 트리). 비용 민감 환경은 에이전트 팀을 끄는 선택을 안내.
+
+> 위 한계는 **Claude Code 에이전트 팀(experimental) 전용**이다. Codex 런타임은 비적용 — `codex exec`/네이티브 subagents 모델로 자체 동시성·`_workspace/status` 실패감지·좀비방지를 둔다. `orchestrator-template.md` template D 참조.
 
 **팀 재구성 패턴:**
 Phase별로 다른 전문가 조합이 필요하면, 이전 팀의 산출물을 파일로 저장 → 팀 정리 → 새 팀 생성 순서로 진행한다. 이전 팀의 산출물은 `_workspace/` 에 보존되므로 새 팀이 Read로 접근 가능하다.
