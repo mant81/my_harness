@@ -4,9 +4,16 @@
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-21
+
 ### Fixed
 
 - **`TeamCreate`/`TeamDelete` 제거 대응 (Claude Code v2.1.178)** — Claude Code가 에이전트 팀 setup/teardown 단계를 없애면서 `TeamCreate`·`TeamDelete` 도구를 제거했다(팀원은 이제 `Agent` 도구로 직접 spawn, `team_name`은 무시, 세션 종료 시 자동 정리). 죽은 도구를 가리키던 스킬 본문·references·문서 3개국어를 `Agent` 팀원 spawn 모델로 갱신. `SendMessage`·`TaskCreate`는 그대로 유효(플래그 게이트 유지). 대상: `skills/myharness/SKILL.md`, `references/{orchestrator-template,team-examples,runtime-adapters,agent-design-patterns}.md`, `README*.md`, `AGENTS.md`, `docs/experimental-dependency.md`. 상세: `docs/experimental-dependency.md` Scenario A/C.
+- **외부 독립 감사 6건 반영** — codex(정합성)+agy(성능/안정성) 외부 리뷰. 확인분: 세션 자동구성 문구 정정, 호환성 감지 트리거 일반화, tmux 좀비·자동정리 불완전 경고(GH #58762/#34750), `--resume` 미복원→`_workspace/` 체크포인트 명문화, task status lag→`SendMessage` 완료보고 요구, 토큰비용→서브 에이전트 폴백 안내. `agent-design-patterns.md`에 "알려진 한계·안정성 경고(experimental, Claude Code 전용)" 블록 신설.
+
+### Changed
+
+- **`_workspace/` 추적 해제** — `.gitignore`에 등록돼 있으나 캐시로 추적되던 작업·리뷰 산출물 42개를 `git rm --cached`로 추적 해제(디스크 보존). 옛 리뷰 로그의 죽은 `TeamCreate` 참조 grep 오탐 해소.
 
 ## [1.1.0] - 2026-06-20
 
