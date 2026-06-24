@@ -200,6 +200,22 @@ your-project/
 계층적으로 위임하는 에이전트 팀이 필요해.
 ```
 
+**AIOps — PaaS 운영 관리 (Kubernetes)** — *모델 라우팅 · 슬림 경로 · 안전 게이트를 한 번에 보여주는 사례*
+```
+PaaS 운영관리 하네스 구성해줘.
+- 도메인: Kubernetes 클러스터 안정 운영 (수집→진단→조치→리포트)
+- 환경: kind 단일노드, kubectl context=docker-desktop, metrics-server 없음
+- 에이전트: 상태수집(읽기), 근본원인진단, 조치적용, 헬스리포트
+- 리스크: 운영/비코드 → 슬림 경로 (외부리뷰·TDD·평가 생략)
+- 런타임: Claude Code only
+- 모델: 고추론(진단/조치)=opus, 수집=haiku, 리포트=sonnet
+- 안전 게이트(k8s-remediate 스킬 본문에 버전관리되는 절차로 명시):
+  변경 적용 전 5개 항목을 평가, 모두 PASS여야 적용. 하나라도 FAIL이면
+  중단하고 사람에게 인계.
+    1) Blast radius  2) Rollback  3) Approval  4) Timing  5) Tenant scope
+  임계값은 references/thresholds.md로 분리(본문에 숫자 박지 말 것).
+```
+
 ## 플러그인 구조
 
 ```

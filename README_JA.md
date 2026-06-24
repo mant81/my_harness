@@ -200,6 +200,22 @@ Webtoon エピソード制作用のハーネス。ストーリー・キャラク
 階層的に委譲するエージェントチームが必要。
 ```
 
+**AIOps — PaaS 運用管理 (Kubernetes)** — *モデルルーティング · スリム経路 · セーフティゲートを一度に示す事例*
+```
+PaaS 運用管理ハーネスを構成して。
+- ドメイン: Kubernetes クラスタの安定運用 (収集→診断→対処→レポート)
+- 環境: 単一ノード kind、kubectl context=docker-desktop、metrics-server なし
+- エージェント: 状態収集(読み取り)、根本原因診断、対処適用、ヘルスレポート
+- リスク: 運用/非コード → スリム経路 (外部レビュー・TDD・評価を省略)
+- ランタイム: Claude Code のみ
+- モデル: 高推論(診断/対処)=opus、収集=haiku、レポート=sonnet
+- セーフティゲート(k8s-remediate スキル本文にバージョン管理された手順として明記):
+  変更を適用する前に 5 項目を評価し、すべて PASS の場合のみ適用。一つでも FAIL なら
+  中断して人間に引き継ぐ。
+    1) Blast radius  2) Rollback  3) Approval  4) Timing  5) Tenant scope
+  しきい値は references/thresholds.md に分離(本文に数値を直書きしない)。
+```
+
 ## プラグイン構造
 
 ```

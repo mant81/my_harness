@@ -202,6 +202,22 @@ A harness for data pipeline design. I need an agent team that hierarchically del
 schema design · ETL logic · validation rules · monitoring setup.
 ```
 
+**AIOps — PaaS operations (Kubernetes)** — *one example showing model routing · slim path · a safety gate*
+```
+Build a harness for PaaS operations management.
+- Domain: stable Kubernetes cluster ops (collect → diagnose → remediate → report)
+- Environment: single-node kind, kubectl context=docker-desktop, no metrics-server
+- Agents: state-collector (read-only), root-cause-diagnoser, remediation-applier, health-reporter
+- Risk: ops / non-code → slim path (skip external review · TDD · evaluation)
+- Runtime: Claude Code only
+- Models: high-reasoning (diagnose/remediate)=opus, collect=haiku, report=sonnet
+- Safety gate (kept as a version-controlled procedure in the k8s-remediate skill body):
+  evaluate 5 checks before applying any change; apply only if ALL pass. If ANY
+  fails, stop and hand off to a human.
+    1) Blast radius  2) Rollback  3) Approval  4) Timing  5) Tenant scope
+  Put thresholds in references/thresholds.md (do not hard-code numbers in the body).
+```
+
 ## Plugin Structure
 
 ```
