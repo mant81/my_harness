@@ -74,7 +74,8 @@ claude   # Claude Code CLI 起動 (Codex は codex コマンド)
 | **エージェントチーム基本** | チームメンバーを `Agent` ツールで spawn、`SendMessage` で直接通信、共有タスクリスト（`TaskCreate`）で自己調整。発見の共有・対立の議論で品質↑ |
 | **スキル自動生成** | Progressive Disclosure（メタデータ→本文→references の段階ロード）でコンテキスト効率化。トリガーの description は積極的に記述 |
 | **2 層品質ゲート** | 内部の生成-検証 QA **＋** 外部の独立レビューループ。詳細は下記 |
-| **教義の注入** | コード／修正エージェントの作業原則に TDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を **実パス** で注入。リスク等級（軽量／標準／重大）でゲート強度を調整 |
+| **教義の注入** | コード／修正エージェントの作業原則に TDD（`tdd-doctrine.md`）・開発ルール（`dev-rules.md`）を **実パス** で注入。**テスト＝第一級レビュー成果物**（RED を GREEN 前に検証、契約・スキーマ・セキュリティのテストのみ外部クロスレビュー）・**安全なロールバック規律**（破壊的 `git reset --hard` を廃止）を含む。リスク等級（軽量／標準／重大）でゲート強度を調整 |
+| **ドキュメント体系** | 中核成果物（設計書・作業計画書・結果書）は `docs/{project}/`（永続・コミットされる監査台帳）、一時物は `_workspace/`（揮発）に2層分離 — 結果書の揮発を防止（RAG 知識循環）。ドキュメントティア（基本は軽量）・git-staging promote・fail-fast。外部レビューツールに非依存（無ければ内部 QA） |
 | **デュアルランタイム** | 単一の正本（`skills/myharness/`）+ ランタイム別の薄いアダプター。`CLAUDE.md`／`AGENTS.md` の両方を出力し、オーケストレーションを分岐（Claude は `Agent` チームメンバー spawn ↔ Codex はネイティブ subagents／`codex exec`）。Phase 7 の同期で drift を防止 |
 | **ビルド済みハーネスの更新** | `/myharness update`（Codex は `$myharness update`） — ファクトリーの正本を既にビルドされたハーネスへ再伝播しつつ **ローカル修正を保護**。`.harness-manifest.json` のハッシュ分類（SAME／自動／USER-MODIFIED 保留／NEW）、`*.local.*` で更新を安全に |
 | **コスト・並行性の制御** | モデルルーティング（高推論→`opus`、単純→軽量）、並行性 cap（デフォルト 3／最大 5）・バックプレッシャー、外部レビュー予算（変更がなければ skip）、smoke／full のテストモードで大規模 fan-out のコストを抑制 |

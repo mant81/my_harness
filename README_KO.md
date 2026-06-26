@@ -74,7 +74,8 @@ claude   # Claude Code CLI 시작 (Codex는 codex 명령)
 | **에이전트 팀 기본** | 팀원을 `Agent` 도구로 spawn, `SendMessage`로 직접 통신, 공유 작업 목록(`TaskCreate`)으로 자체 조율. 발견 공유·상충 토론으로 품질↑ |
 | **스킬 자동 생성** | Progressive Disclosure(메타데이터→본문→references 단계 로딩)로 컨텍스트 효율. 트리거 description은 적극적으로 작성 |
 | **2층 품질 게이트** | 내부 생성-검증 QA **+** 외부 독립 리뷰 루프. 아래 상세 |
-| **교리 주입** | 코드/수정 에이전트의 작업 원칙에 TDD(`tdd-doctrine.md`)·개발 규칙(`dev-rules.md`)을 **실경로**로 주입. 리스크 등급(경량/표준/중대)으로 게이트 강도 조절 |
+| **교리 주입** | 코드/수정 에이전트의 작업 원칙에 TDD(`tdd-doctrine.md`)·개발 규칙(`dev-rules.md`)을 **실경로**로 주입. **테스트=1급 리뷰 산출물**(RED를 GREEN 전 검증, 계약·스키마·보안 테스트만 외부 교차리뷰) · **안전 롤백 규율**(파괴적 `git reset --hard` 폐기) 포함. 리스크 등급(경량/표준/중대)으로 게이트 강도 조절 |
+| **문서 체계** | 핵심 산출물(설계서·작업계획서·결과서)은 `docs/{project}/`(영속·커밋 감사 원장), 임시물은 `_workspace/`(휘발) 2층 분리 — 결과서 휘발 방지(RAG 지식 순환). 문서 티어(기본 경량)·git-staging promote·fail-fast. 외부 리뷰 도구와 무관(없으면 내부 QA) |
 | **듀얼 런타임** | 단일 정본(`skills/myharness/`) + 런타임별 얇은 어댑터. `CLAUDE.md`/`AGENTS.md` 둘 다 출력, 오케스트레이션 분기(Claude `Agent` 팀원 spawn ↔ Codex 네이티브 subagents/`codex exec`). Phase 7 동기화로 drift 방지 |
 | **빌드 하네스 업데이트** | `/myharness update`(Codex `$myharness update`) — 팩토리 정본을 이미 빌드된 하네스에 재전파하되 **로컬 수정 보호**. `.harness-manifest.json` 해시 분류(SAME/자동/USER-MODIFIED 보류/NEW), `*.local.*`로 업데이트 안전 |
 | **비용·동시성 제어** | 모델 라우팅(고추론→`opus`, 단순→경량), 동시성 cap(기본 3/최대 5)·백프레셔, 외부 리뷰 예산(변경 없으면 skip), smoke/full 테스트 모드로 대규모 fan-out 비용 통제 |
