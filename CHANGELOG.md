@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-06-28
+
+### Fixed
+
+- **외부 리뷰 가시성·안정성 — Step 2를 launch/await/poll 모델로 재설계** — 외부 리뷰가 동기 Bash 1콜로 돌아 최대 600s간 "끊긴 것처럼" 보이던 문제를 오케스트레이션 계층에서 해소. 리뷰어 블록을 `run_in_background`로 launch → 시작/결과를 오케스트레이터 텍스트로 보고 → 완료 task-notification으로 재진입(30s 폴링 폐기, fallback wakeup 필수화). 외부감사 2라운드(codex×2+agy×2, 30건) 반영 — **확인분:** ① 데드락 차단(in-block heartbeat+bare wait 폐기) ② 단일 JSON 동시쓰기 경합 → 리뷰어별 lock-free `_{tool}.rc` 순차취합(macOS `flock` 부재 대응) ③ 부분실패 가시화(통일 스키마 `running|completed|partial|failed|no-reviewers`) ④ `ok=0&&fail=0`(미지도구) → `completed` 위장 차단 ⑤ timeout 부재+hang → 완료알림 미수신 좀비 차단(fallback wakeup) ⑥ stale 판정용 `started` + atomic temp+mv 쓰기. **기각/이월:** 3+리뷰어(러너 제외가 구조적 차단), TOFLAG 공백경로(YAGNI), check-rc 분리·argv limit·실CLI smoke(백로그). 검증: e2e 20/20 PASS(bash 3.2.57) + 정책 감사 PASS + 세션 내 background→notification→재진입 dogfood 실증. 대상: `references/external-review-loop.md`.
+
 ## [1.2.0] - 2026-06-26
 
 ### Added
