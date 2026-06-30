@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-06-30
+
+### Added
+
+- **적대적 의사결정 검토 (Adversarial Decision Review) — 복합 패턴으로 문서화** — 7번째 1급 빌더 패턴 '토론(Debate)' 추가를 검토 → **기각**하고, 더 가벼운 제3안을 반영. 자체검토 + 외부감사 2종(codex 10+agy 5, 강수렴): 같은 엔진 논객은 같은 맹점 공유(가짜 토론) · 다엔진이면 `external-review-loop`와 위상 동형 · 토론은 배선(topology) 아닌 상호작용 프로토콜이라 6패턴과 축이 다름 · SKILL.md 500/500 캡 포화로 무게 순증 정당화 불가. **반영(코드·SKILL 무변경, 문서만):** `agent-design-patterns.md` 복합 패턴 표에 "적대적 의사결정 검토(팬아웃+반복 생성-검증)" 1행(별 패턴 아님 명시 + 가짜토론·false-balance·토큰 팽창 경고), `external-review-loop.md`에 "응용 — 의사결정 적대 검토" 1절(판정엔진 재사용 · 엔진 다양성 전제 · 적합성 사전체크 · 교착=인간 승인). **관계 정립:** external-review-loop = 상위 판정엔진, 토론 = 그 의사결정 응용모드. 빌더 패턴 개수 6 유지. 결정기록: `docs/myharness/debate-pattern-design.md`. 정책 감사 PASS.
+
 ## [1.2.1] - 2026-06-28
 
 ### Fixed
