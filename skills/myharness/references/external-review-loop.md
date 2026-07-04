@@ -78,6 +78,10 @@ TO="$(command -v timeout || command -v gtimeout || true)"
 [ -z "$TO" ] && TOFLAG="" || TOFLAG="$TO 600s"   # 부재 시 무타임아웃(문서화된 한계 — agy만 자체 --print-timeout)
 S={단계ID}
 D=_workspace/reviews
+# 상황별 모델 선택(오케스트레이터가 리스크등급에 맞춰 설정 — 아래 "상황별 모델" 참조). 미설정 시 기본.
+#  ⚠️ AGY_MODEL은 반드시 Gemini 계열만 — agy를 Claude/GPT로 돌리면 러너와 엔진 충돌(자기검증).
+AGY_MODEL="${AGY_MODEL:-Gemini 3.1 Pro (High)}"   # 경량: "Gemini 3.5 Flash (High)" / 중대: "Gemini 3.1 Pro (High)"
+CODEX_MODEL="${CODEX_MODEL:-}"                     # 비우면 codex 기본. 중대 시 고추론 모델명 지정.
 # 러너 제외 리뷰어 목록(스크립트가 산출). REVIEWERS: 줄만 신뢰. {러너}=생성 시 claude|codex로 치환.
 REVIEWERS="$(bash {스킬scripts}/check-review-tools.sh {러너} | sed -n 's/^REVIEWERS: //p')"
 
@@ -105,7 +109,7 @@ write_status "$(printf '{"status":"running","reviewers":"%s","started":%s,"resul
 
 # 일반/정합성 리뷰어 = REVIEWERS 중 러너 아닌 쪽(codex|claude). 든 것만 실행.
 case " $REVIEWERS " in
-  *" codex "*)  run_reviewer codex codex exec --sandbox read-only "$(cat $D/${S}_prompt_general.md)" & ;;
+  *" codex "*)  run_reviewer codex codex exec ${CODEX_MODEL:+-m "$CODEX_MODEL"} --sandbox read-only "$(cat $D/${S}_prompt_general.md)" & ;;
   *" claude "*) run_reviewer claude claude -p "$(cat $D/${S}_prompt_general.md)" \
       --permission-mode plan --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(rg:*)" & ;;
 esac
@@ -114,7 +118,7 @@ case " $REVIEWERS " in
   # agy: --add-dir(리뷰대상 repo를 워크스페이스에)+--dangerously-skip-permissions(TTY 없는 -p서 권한 자동승인)
   # 필수 — 없으면 sandbox 파일 read가 권한 프롬프트→응답 불가→hang. 상세는 아래 "agy 파일접근 배선".
   *" agy "*)    run_reviewer agy agy -p "$(cat $D/${S}_prompt_perf.md)" \
-      --model "Gemini 3.1 Pro (High)" --add-dir "$(pwd)" --dangerously-skip-permissions \
+      --model "$AGY_MODEL" --add-dir "$(pwd)" --dangerously-skip-permissions \
       --sandbox --print-timeout 180s & ;;
   *" gemini "*) run_reviewer gemini gemini -p "$(cat $D/${S}_prompt_perf.md)" \
       --add-dir "$(pwd)" --dangerously-skip-permissions & ;;
@@ -138,6 +142,8 @@ write_status "$(printf '{"status":"%s","reviewers":"%s","started":%s,"results":{
 echo "DONE: status=$overall ok=$ok fail=$fail"   # 완료 신호(launch 모드에선 tool result로 회수)
 ```
 - **상태 스키마(통일):** `{"status": running|completed|partial|failed|no-reviewers, "reviewers": "...", "results": {"codex":"ok|fail", "agy":"ok|fail"}}`. `partial`=일부 성공(예: codex ok·agy 타임아웃) — `completed`로 뭉뚱그려 부분실패를 숨기지 않는다. Step 3은 이 status + 리뷰어별 출력 *내용*으로 판단.
+- **상황별 모델 선택(req):** 오케스트레이터가 단계 리스크등급(경량/표준/중대)에 맞춰 `AGY_MODEL`·`CODEX_MODEL`을 설정한다. **경량/표준** → 경량·저비용(`AGY_MODEL="Gemini 3.5 Flash (High)"`, codex 기본) — 초대형 산출물·단순 검토·비용 절감. **중대** → 고성능(`AGY_MODEL="Gemini 3.1 Pro (High)"`, `CODEX_MODEL`=고추론 모델) — 정확도 우선. 미설정 시 기본(Gemini 3.1 Pro High / codex 기본). 가용 모델은 `agy models`·`codex --help`로 확인.
+  - ⚠️ **엔진 다양성 가드:** `AGY_MODEL`은 **Gemini 계열만**. agy는 Claude/GPT-OSS 모델도 실행 가능하나, agy를 Claude로 돌리면 claude 러너와 같은 엔진 = 자기검증(엔진 다양성 붕괴). 모델은 *엔진 내* 선택일 뿐 — 엔진(codex≠claude≠agy_gemini)은 러너 제외 규칙(§독립성)이 고정.
 - **agy 파일접근 배선(req — 지우지 말 것):** agy는 `--sandbox`라 리뷰 대상이 워크스페이스 밖이면 파일 read가 권한 프롬프트를 띄운다. `-p`(비대화)+`< /dev/null`(TTY 없음)이면 그 프롬프트에 응답 못 해 **무한 hang**(→ speculative fallback 또는 timeout kill, exit 124/144). 따라서 **`--add-dir "$(pwd)"`(리뷰 대상 repo를 워크스페이스에 추가) + `--dangerously-skip-permissions`(도구권한 자동승인)** 가 필수. 실증: 이 둘 없으면 repo 상대경로 파일(예 `_workspace/…`) 접근이 hang, 있으면 실제 file:line 근거로 정상 판정+종료(exit 0). codex는 `codex exec`가 자체 read-only 파일접근이라 무영향(대조군). 프롬프트가 상대경로를 줘도 `--add-dir` repo 루트로 커버됨.
 - **타임아웃 무방비 주의:** `timeout`/`gtimeout` 없으면 `TOFLAG` 비어 `codex`·`claude`는 무타임아웃(agy만 자체 `--print-timeout` 180s). hang 시 `wait` 무한 블로킹 → **GNU coreutils(`gtimeout`) 설치 권장**. 자체 `sleep…&kill` 워치독은 오탐 kill 위험이라 미채택 — 대신 launch 모드라 오케스트레이터가 과대 경과 시 중단/계속을 판정할 수 있다.
 - 타임아웃·실패(`_{tool}.rc`≠0 또는 출력 빔) 시 **오케스트레이터가 1회 수동 재실행** → 재실패 시 도구 누락 명시 후 단일 출처로 진행(**루프 차단 금지**). Step 3은 파일 유무가 아니라 rc+내용으로 판단.
