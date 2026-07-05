@@ -362,7 +362,22 @@ wait   # 여러 개 띄운 뒤
 - 기본 = 경량(T0/Tμ). 모호하면 가벼운 쪽(fail-safe=경량). **단 리스크=중대면 최소 T1.**
 
 **promote = git staging (커스텀 mv 금지)**
-- 산출물을 처음부터 `docs/{project}/`에 쓰되, **게이트 통과분만 `git add`/commit.** 여기서 "게이트" = 적용되는 검증 — 외부 리뷰어 있으면 external-review-loop, **없으면 내부 QA**(외부 도구 강제 아님). 미검증·실패분은 워킹트리에 남되 commit 안 함(원장 미오염). 순서: 기록→게이트→승인→커밋(external-review-loop Step 7).
+- 산출물을 처음부터 `docs/{project}/`에 쓰되, **게이트 통과분만 `git add`/commit.** 여기서 "게이트" = 적용되는 검증 — 외부 리뷰어 있으면 external-review-loop, **없으면 내부 QA**(외부 도구 강제 아님). 미검증·실패분은 워킹트리에 남되 commit 안 함(원장 미오염). 순서: 기록→게이트→**check-artifacts**→승인→커밋(external-review-loop Step 7).
+
+**강제장치 = check-artifacts + pre-commit hook (프롬프트 강제 금지)**
+- `scripts/check-artifacts.sh <docs_dir> [tier]` — 결과서가 `docs/{project}/working_history/`에 실제 기록됐는지 + `## 다음 단계 참조` 블록(빈/스텁 false-pass 차단) 검증. 끝줄 `ARTIFACTS: ok | missing:<사유>`(항상 exit 0 — 상태는 끝줄로만, 파이프 안전). T0/Tμ = PASS(무마찰).
+- **왜 프롬프트 아님:** 체크리스트/게이트 호출을 오케스트레이터가 과업 몰입 중 스킵하고 "확인함" 할루시 → 무력(외부감사). → **런타임 물리 차단**: 생성 하네스가 타겟 레포에 `.git/hooks/pre-commit`을 설치, 이 hook이 `check-artifacts.sh` 끝줄을 파싱해 `missing:`이면 **커밋 거부**(exit 1). 결과서 없이는 물리적으로 커밋 불가.
+- **hook 설치(생성 하네스 초기화 시, 멱등):**
+  ```bash
+  H="$(git rev-parse --git-path hooks)/pre-commit"; SK="$(dirname "$0")/skills/myharness/scripts/check-artifacts.sh"
+  if [ ! -e "$H" ]; then cat > "$H" <<EOF
+  #!/usr/bin/env bash
+  line="\$(bash "$SK" "\$(git rev-parse --show-toplevel)/docs/\${MYH_PROJECT:-project}" "\${MYH_TIER:-t1}" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
+  case "\$line" in ok) exit 0 ;; *) echo "COMMIT BLOCKED — 결과서 누락: \$line" >&2; echo "복구: docs/{project}/working_history/에 결과서(## 다음 단계 참조 포함) 작성 — 템플릿 references/templates/working-history-skeleton.md" >&2; exit 1 ;; esac
+  EOF
+  chmod +x "$H"; fi
+  ```
+  기존 hook 있으면 append/공존 검토(덮어쓰기 금지). `MYH_PROJECT`/`MYH_TIER` 환경변수로 프로젝트·티어 전달(미설정 시 project/t1). actionable FAIL(복구 힌트)로 에이전트 무한루프 방지.
 
 **실패 = fail-fast (동적 격상·소급 계획서 금지)**
 - Tμ/T1에서 에러 반복 시: 1회 재시도 실패 → 비파괴 롤백(`tdd-doctrine.md` 롤백 규율) + 사용자에게 보고하고 "단계형(T2)으로 재시작" 제안. 소급 계획서 생성·자동 격상 안 함.

@@ -45,7 +45,7 @@ if [ "${bytes:-0}" -lt 200 ]; then
   echo "ARTIFACTS: missing:result-doc-too-small(${bytes}b:$latest)"
   exit 0
 fi
-if ! grep -q '^## 다음 단계 참조' "$latest" 2>/dev/null; then
+if ! grep -qE '^##[[:space:]].*다음 단계 참조' "$latest" 2>/dev/null; then  # 번호 접두(## 7. ) 허용
   echo "ARTIFACTS: missing:no-next-step-block($latest)"
   exit 0
 fi
