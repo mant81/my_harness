@@ -381,26 +381,30 @@ wait   # 여러 개 띄운 뒤
   # >>> myharness:check-artifacts >>>
   __myh() {
     local root; root="$(git rev-parse --show-toplevel)"
-    local project="${MYH_PROJECT:-{PROJECT}}" tier="${MYH_TIER:-{TIER}}"
-    local chk="$root/{SCRIPTS}/check-artifacts.sh"
+    # tier 는 baked 리터럴만(env 하향 금지 — MYH_TIER=t0 로 강제 우회하는 것 차단). project 는 override 허용하되
+    # single-quote 리터럴로 주입(injection 방어: 프로젝트명 " ` $() \ 있어도 실행·구문붕괴 없음).
+    local project="${MYH_PROJECT:-}"; [ -z "$project" ] && project='{PROJECT}'
+    local tier='{TIER}'
+    local chk="$root/"'{SCRIPTS}'"/check-artifacts.sh"
     case "$(printf %s "$tier" | tr 'A-Z' 'a-z')" in t0|tμ|tµ|tmu) return 0 ;; esac
     # ① 이 커밋이 working_history *직속*에 결과서를 스테이징했는가?
     #    quotepath=false: 한글 파일명 "..." 래핑→.md 매칭실패→전커밋차단 방지(req).
-    #    diff-filter=AMR: 추가/수정/개명만. awk: basename 필터(경로 _/template 오탐 없음)+하위폴더(subdir-noop) 제외.
+    #    diff-filter=d: 삭제만 제외(A/C/M/R/T 포함 — cp 복사 C 누락 방지). awk: basename 필터(경로 _/template 오탐 없음,
+    #    대소문자 무시)+하위폴더(subdir-noop) 제외.
     local pfx="docs/$project/working_history/"
-    local staged; staged="$(git -c core.quotepath=false diff --cached --name-only --diff-filter=AMR -- "$pfx" 2>/dev/null \
-      | awk -v p="$pfx" 'index($0,p)==1 { r=substr($0,length(p)+1); if (r ~ /\//) next; if (r ~ /^_/) next; if (r ~ /template/) next; if (r !~ /\.md$/) next; print }')"
+    local staged; staged="$(git -c core.quotepath=false diff --cached --name-only --diff-filter=d -- "$pfx" 2>/dev/null \
+      | awk -v p="$pfx" 'index($0,p)==1 { r=substr($0,length(p)+1); if (r ~ /\//) next; if (tolower(r) ~ /^_|template/) next; if (r !~ /\.md$/) next; print }')"
     if [ -z "$staged" ]; then
       echo "COMMIT BLOCKED — 결과서 미스테이징: ${pfx}*.md 를 git add 하라." >&2
-      echo "복구: 결과서(## 다음 단계 참조 포함) 작성→git add. 템플릿: working-history-skeleton.md. (의도적 중간커밋이면 git commit --no-verify)" >&2
+      echo "복구: 결과서(## 다음 단계 참조 포함) 작성→git add. 템플릿: working-history-skeleton.md. (의도적 중간커밋·amend 는 git commit --no-verify)" >&2
       return 1
     fi
-    # ② 스테이징된 결과서 *그 파일*을 직접 내용 검증(빈/스텁·subdir-noop·stale-latest false-pass 차단).
+    # ② *스테이지 blob* 을 직접 내용 검증 — git show :path 파이프(워킹트리 아닌 index → TOCTOU 우회 차단).
     [ -f "$chk" ] || { echo "COMMIT BLOCKED — check-artifacts.sh 없음($chk) — 하네스 재설치 필요." >&2; return 1; }
     local p line ok=0
     while IFS= read -r p; do
       [ -n "$p" ] || continue
-      line="$(bash "$chk" --file "$root/$p" "$tier" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
+      line="$(git show ":$p" 2>/dev/null | bash "$chk" --file - "$tier" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
       [ "$line" = ok ] && { ok=1; break; }
     done <<STAGED
   $staged
@@ -417,13 +421,16 @@ wait   # 여러 개 띄운 뒤
     { echo '#!/usr/bin/env bash'; emit_body; } > "$H"; chmod +x "$H"
   elif grep -qF "$MARK" "$H"; then :                       # 이미 설치 → no-op(멱등)
   else                                                     # 외부 hook 존재 → wrapper(append 는 exit 0/exec 로 끝나면 dead code=R2-c)
-    mv "$H" "$H.local"                                     # 우리 검사 먼저 → 외부 hook 위임(종료코드 보존)
-    { echo '#!/usr/bin/env bash'; emit_body; printf '[ -x "%s.local" ] && "%s.local" "$@" || exit $?\n' "$H" "$H"; } > "$H"
-    chmod +x "$H"
+    bak="$H.local"; [ -e "$bak" ] && bak="$H.local.$$"   # 충돌 방지(기존 .local 덮어쓰기 금지). 함수 밖이라 local 금지.
+    mv "$H" "$bak"                                         # 우리 검사 먼저 → 외부 hook 위임
+    { echo '#!/usr/bin/env bash'; emit_body
+      # 외부 hook 실행 가능할 때만 위임(종료코드 보존). 비실행/부재면 exit 0(dormant hook 이 전커밋차단하지 않게).
+      printf 'if [ -x "%s" ]; then "%s" "$@"; exit $?; fi\nexit 0\n' "$bak" "$bak"
+    } > "$H"; chmod +x "$H"
   fi
   ```
   > ⚠️ **heredoc 종료 토큰 `HOOK`·`STAGED` 는 실제 생성 시 행 맨앞(들여쓰기 0)**. 위 예시의 들여쓰기는 문서 가독용 — 오케스트레이터가 하네스에 박을 때 제거하라(`<<-` +탭 대안).
-  - `{PROJECT}`/`{TIER}`/`{SCRIPTS}`(예 `.claude/skills/{하네스명}/scripts`)는 **팩토리가 생성 시 리터럴 치환**. actionable FAIL(복구 힌트+`--no-verify` 안내)로 에이전트 무한루프 방지.
+  - `{PROJECT}`/`{TIER}`/`{SCRIPTS}`(예 `.claude/skills/{하네스명}/scripts`)는 **팩토리가 생성 시 리터럴 치환**. ⚠️ **주입 방어(req):** 팩토리는 `{PROJECT}`·`{SCRIPTS}` 를 **슬러그(`[A-Za-z0-9._/-]`)로 검증**한 뒤 박는다(`'` 등 메타문자 금지 — single-quote 안이라도 `'` 는 탈출). actionable FAIL(복구 힌트+`--no-verify` 안내)로 에이전트 무한루프 방지.
   - **강제 2층:** ① 스테이징 강제(hook·git-aware — 커밋마다 working_history 직속 신규 결과서 요구) + ② **그 스테이징 파일 자체** 내용 검증(`--file`). "최신 하나"만 보는 stale-latest·zzz·subdir-noop 우회를 ①+②가 함께 막는다(외부감사 2R 반영).
   - ⚠️ **heredoc 들여쓰기 주의:** 위 블록의 `<<STAGED … STAGED` 는 예시상 2칸 들여썼다. 실제 생성 시 **종료 토큰 `STAGED` 는 행 맨앞(들여쓰기 0)** 이거나 `<<-` + 탭이어야 한다 — 오케스트레이터가 하네스에 박을 때 들여쓰기를 제거하라.
 

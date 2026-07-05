@@ -41,7 +41,11 @@
 **보너스 자체발견:** installer `BODY="$(cat <<'HOOK'…)"` 캡처가 macOS **bash 3.2**서 중첩 heredoc+멀티라인+`set -u` 조합에 `unbound` 오류 → **heredoc 파일 직접 emit**(변수 캡처 제거)로 회피.
 
 **재실증 — L2 mock A/B v3 16/16 PASS:** 누락 차단·유효 통과·스텁 차단·**한글명 정상·template/`_` 프로젝트 정상·subdir-noop 차단·stale-latest 차단·외부hook wrapper(위임 보존)·멱등·slim(T0/Tμ) 무마찰**. 모두 결정적(LLM 노이즈 0).
-> 주: R2 이후 수정은 결정적 A/B(정확히 R2 지적건 커버)로 검증. 외부 3R 재감사는 미실행(2R 스코프) — 원하면 추가 가능.
+
+**Round 3 (수렴 확인 — 재작성분 감사, 확인 5건+):** ① **TOCTOU** — hook 이 워킹트리(`$root/$p`) 검증 → stub 스테이지 후 워킹트리만 valid 편집으로 우회(codex#1·agy#2) · ② **injection** — `{PROJECT}` 리터럴이 `"${:-{PROJECT}}"` 안 → 프로젝트명 `$()`·따옴표로 명령 실행/구문붕괴(agy 가 `injected.txt` PoC 실생성·codex#3) · ③ **wrapper 비실행 외부hook** — `[ -x ]&&…||exit $?` → dormant 비실행 hook 있으면 exit1 전커밋차단(codex#4·agy#1) · ④ **MYH_TIER=t0 env 우회** — env 로 강제 하향(codex#2) · ⑤ mv `.local` 충돌(codex#5) · template 대소문자·amend·diff-filter C(low).
+**수정:** check-artifacts `--file -`(stdin) — hook 이 `git show :path`로 **스테이지 blob** 검증(TOCTOU 폐쇄). tier **baked-only**(env 하향 금지). `{PROJECT}` single-quote 리터럴+팩토리 슬러그 제약(injection). wrapper 비실행 시 `exit 0` 폴백. mv 충돌 가드. `tolower(template)`+`--diff-filter=d`.
+**재실증 — L2 mock A/B v4 16/16 PASS:** TOCTOU(stage stub+worktree valid→차단)·injection(명령 미실행·bash -n ok)·MYH_TIER=t0 우회 불가·비실행 외부hook 통과·실행 외부hook 위임 보존·Template 대소문자·mv `.local` 보존·`--file -` stdin.
+> 주: R1→R2→R3 각 라운드가 실결함 발견(미수렴) → 재작성분 R4 로 dry 확인 권장/진행. 각 수정은 정확히 그 라운드 지적건을 커버하는 결정적 A/B 로 검증.
 
 ## 1. 근본원인 (재확인)
 D4 문서체계는 설계됐으나 **강제장치(forcing function)가 없다.** 외부리뷰엔 `check-review-tools.sh`+게이트가 있어 신뢰되는데, 문서기록엔 검증 스크립트도, 하드 체크리스트 게이트도, 기본값도(T0=_workspace만) 없다 → LLM이 과업 몰입 중 스킵. **구조가 아니라 강제가 문제.**

@@ -30,11 +30,17 @@ tier_is_slim() { case "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" in t0|tμ|tµ|tmu) 
 mode="${1:-}"
 
 # ── 모드 ②: 단일 파일 검증(hook 이 스테이징된 결과서 직접 검증) ──
+#   `--file -` : stdin 검증(hook 이 `git show :path` 로 *스테이지 blob* 을 파이프 → 워킹트리 아닌 index 검증,
+#   TOCTOU 우회 차단: stub 스테이지 후 워킹트리만 valid 편집으로 통과하는 것 방지).
 if [ "$mode" = "--file" ]; then
   f="${2:-}"; tier="${3:-t1}"
   tier_is_slim "$tier" && { echo "ARTIFACTS: ok"; exit 0; }
   [ -z "$f" ] && { echo "ARTIFACTS: missing:no-file-arg"; exit 0; }
-  r="$(validate_file "$f")"
+  if [ "$f" = "-" ]; then
+    tmp="$(mktemp 2>/dev/null || echo "/tmp/myh.$$")"; cat > "$tmp"; r="$(validate_file "$tmp")"; rm -f "$tmp"
+  else
+    r="$(validate_file "$f")"
+  fi
   [ "$r" = ok ] && echo "ARTIFACTS: ok" || echo "ARTIFACTS: missing:$r"
   exit 0
 fi
