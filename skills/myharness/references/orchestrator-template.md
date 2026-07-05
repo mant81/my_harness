@@ -381,9 +381,9 @@ wait   # 여러 개 띄운 뒤
   # >>> myharness:check-artifacts >>>
   __myh() {
     local root; root="$(git rev-parse --show-toplevel)"
-    # tier 는 baked 리터럴만(env 하향 금지 — MYH_TIER=t0 로 강제 우회하는 것 차단). project 는 override 허용하되
-    # single-quote 리터럴로 주입(injection 방어: 프로젝트명 " ` $() \ 있어도 실행·구문붕괴 없음).
-    local project="${MYH_PROJECT:-}"; [ -z "$project" ] && project='{PROJECT}'
+    # project·tier 는 baked 리터럴만(env override 금지). MYH_PROJECT 로 다른 프로젝트를 지목하면 그쪽 스테이지
+    # 결과서로 gate 를 만족시켜 우회 가능(codex R4) → env 제거. single-quote 리터럴(injection 방어: " ` $() \ 무해).
+    local project='{PROJECT}'
     local tier='{TIER}'
     local chk="$root/"'{SCRIPTS}'"/check-artifacts.sh"
     case "$(printf %s "$tier" | tr 'A-Z' 'a-z')" in t0|tμ|tµ|tmu) return 0 ;; esac
@@ -401,9 +401,12 @@ wait   # 여러 개 띄운 뒤
     fi
     # ② *스테이지 blob* 을 직접 내용 검증 — git show :path 파이프(워킹트리 아닌 index → TOCTOU 우회 차단).
     [ -f "$chk" ] || { echo "COMMIT BLOCKED — check-artifacts.sh 없음($chk) — 하네스 재설치 필요." >&2; return 1; }
-    local p line ok=0
+    local p line mode ok=0
     while IFS= read -r p; do
       [ -n "$p" ] || continue
+      # symlink(mode 120000) 결과서 거부 — blob 이 링크 타겟 문자열이라 위조 통과 가능(codex R4). 정규파일만.
+      mode="$(git ls-files -s -- "$p" 2>/dev/null | awk '{print $1; exit}')"
+      case "$mode" in 100644|100755) ;; *) continue ;; esac
       line="$(git show ":$p" 2>/dev/null | bash "$chk" --file - "$tier" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
       [ "$line" = ok ] && { ok=1; break; }
     done <<STAGED
@@ -421,17 +424,20 @@ wait   # 여러 개 띄운 뒤
     { echo '#!/usr/bin/env bash'; emit_body; } > "$H"; chmod +x "$H"
   elif grep -qF "$MARK" "$H"; then :                       # 이미 설치 → no-op(멱등)
   else                                                     # 외부 hook 존재 → wrapper(append 는 exit 0/exec 로 끝나면 dead code=R2-c)
-    bak="$H.local"; [ -e "$bak" ] && bak="$H.local.$$"   # 충돌 방지(기존 .local 덮어쓰기 금지). 함수 밖이라 local 금지.
+    bak="$H.local"; n=0                                   # 충돌 방지(기존 .local 덮어쓰기 금지). while 로 유일경로 보장.
+    while [ -e "$bak" ]; do n=$((n+1)); bak="$H.local.$n"; done   # 함수 밖이라 local 금지.
     mv "$H" "$bak"                                         # 우리 검사 먼저 → 외부 hook 위임
     { echo '#!/usr/bin/env bash'; emit_body
       # 외부 hook 실행 가능할 때만 위임(종료코드 보존). 비실행/부재면 exit 0(dormant hook 이 전커밋차단하지 않게).
-      printf 'if [ -x "%s" ]; then "%s" "$@"; exit $?; fi\nexit 0\n' "$bak" "$bak"
+      # %q: repo 경로에 " ` $() 있어도 안전(경로 injection 방어 — agy R4).
+      printf 'if [ -x %q ]; then %q "$@"; exit $?; fi\nexit 0\n' "$bak" "$bak"
     } > "$H"; chmod +x "$H"
   fi
   ```
   > ⚠️ **heredoc 종료 토큰 `HOOK`·`STAGED` 는 실제 생성 시 행 맨앞(들여쓰기 0)**. 위 예시의 들여쓰기는 문서 가독용 — 오케스트레이터가 하네스에 박을 때 제거하라(`<<-` +탭 대안).
   - `{PROJECT}`/`{TIER}`/`{SCRIPTS}`(예 `.claude/skills/{하네스명}/scripts`)는 **팩토리가 생성 시 리터럴 치환**. ⚠️ **주입 방어(req):** 팩토리는 `{PROJECT}`·`{SCRIPTS}` 를 **슬러그(`[A-Za-z0-9._/-]`)로 검증**한 뒤 박는다(`'` 등 메타문자 금지 — single-quote 안이라도 `'` 는 탈출). actionable FAIL(복구 힌트+`--no-verify` 안내)로 에이전트 무한루프 방지.
-  - **강제 2층:** ① 스테이징 강제(hook·git-aware — 커밋마다 working_history 직속 신규 결과서 요구) + ② **그 스테이징 파일 자체** 내용 검증(`--file`). "최신 하나"만 보는 stale-latest·zzz·subdir-noop 우회를 ①+②가 함께 막는다(외부감사 2R 반영).
+  - **강제 2층:** ① 스테이징 강제(hook·git-aware — 커밋마다 working_history 직속 신규 결과서 요구) + ② **스테이지 blob** 내용 검증(`git show :path | --file -` — 워킹트리 아님). stale-latest·zzz·subdir-noop·TOCTOU·symlink 우회를 ①+②가 함께 막는다(외부감사 4R 반영).
+  - **env override 없음:** project·tier 는 baked 리터럴만(`MYH_PROJECT`/`MYH_TIER` 로 다른 프로젝트 지목·티어 하향 = gate 우회 → 제거). 정당한 tier 변경은 재생성/`--no-verify`.
   - ⚠️ **heredoc 들여쓰기 주의:** 위 블록의 `<<STAGED … STAGED` 는 예시상 2칸 들여썼다. 실제 생성 시 **종료 토큰 `STAGED` 는 행 맨앞(들여쓰기 0)** 이거나 `<<-` + 탭이어야 한다 — 오케스트레이터가 하네스에 박을 때 들여쓰기를 제거하라.
 
 **실패 = fail-fast (동적 격상·소급 계획서 금지)**

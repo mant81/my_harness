@@ -45,7 +45,12 @@
 **Round 3 (수렴 확인 — 재작성분 감사, 확인 5건+):** ① **TOCTOU** — hook 이 워킹트리(`$root/$p`) 검증 → stub 스테이지 후 워킹트리만 valid 편집으로 우회(codex#1·agy#2) · ② **injection** — `{PROJECT}` 리터럴이 `"${:-{PROJECT}}"` 안 → 프로젝트명 `$()`·따옴표로 명령 실행/구문붕괴(agy 가 `injected.txt` PoC 실생성·codex#3) · ③ **wrapper 비실행 외부hook** — `[ -x ]&&…||exit $?` → dormant 비실행 hook 있으면 exit1 전커밋차단(codex#4·agy#1) · ④ **MYH_TIER=t0 env 우회** — env 로 강제 하향(codex#2) · ⑤ mv `.local` 충돌(codex#5) · template 대소문자·amend·diff-filter C(low).
 **수정:** check-artifacts `--file -`(stdin) — hook 이 `git show :path`로 **스테이지 blob** 검증(TOCTOU 폐쇄). tier **baked-only**(env 하향 금지). `{PROJECT}` single-quote 리터럴+팩토리 슬러그 제약(injection). wrapper 비실행 시 `exit 0` 폴백. mv 충돌 가드. `tolower(template)`+`--diff-filter=d`.
 **재실증 — L2 mock A/B v4 16/16 PASS:** TOCTOU(stage stub+worktree valid→차단)·injection(명령 미실행·bash -n ok)·MYH_TIER=t0 우회 불가·비실행 외부hook 통과·실행 외부hook 위임 보존·Template 대소문자·mv `.local` 보존·`--file -` stdin.
-> 주: R1→R2→R3 각 라운드가 실결함 발견(미수렴) → 재작성분 R4 로 dry 확인 권장/진행. 각 수정은 정확히 그 라운드 지적건을 커버하는 결정적 A/B 로 검증.
+**Round 4 (재작성분 감사 — 확인 5건, 성격 전환=엣지/적대/방어심화):** ① MYH_PROJECT env retarget — 다른 프로젝트 지목해 그쪽 스테이지 결과서로 gate 만족(codex#1, tier와 동류) · ② symlink 결과서 — blob 이 링크 타겟 문자열이라 위조 통과(codex#2) · ③ wrapper repo경로 injection — `$bak` 무탈출 baked(agy#1) · ④ mktemp 폴백 `/tmp/…$$` symlink 공격(agy#2) · ⑤ `.local` 충돌 단일검사(agy#4). **기각:** awk escape(agy#3 — 슬러그 제약이 backslash 제거).
+**수정:** project·tier **baked-only**(env override 전면 제거). symlink `git ls-files -s` mode 120000 거부. wrapper `printf %q`(경로 injection). mktemp 실패 시 안전종료(폴백 제거). `.local` while 유일경로.
+**재실증 — L2 mock A/B v5 18/18 PASS:** +symlink 거부·MYH_PROJECT retarget 차단(위 R3 케이스 전부 유지).
+
+**수렴 판정:** R1(정상입력 파손: underscore·template) → R2(정상입력 파손: 한글 quotepath) → R3(우회: TOCTOU·injection·tier) → **R4(엣지/적대: env retarget·symlink·악성 repo경로·mktemp·PID충돌)**. 결함 성격이 "정상 사용 파손"→"의도적 우회"→"공격자 통제 입력 방어심화"로 이동. **정상+대부분 적대 케이스는 R1–R4로 견고.** R5 는 이론적 레이스·이색 git config 등 실사용 무관 tail 로 수렴 예상 — 비용 대비 실익 낮음(중단 권장, 요청 시 진행).
+> 각 라운드 수정은 정확히 그 라운드 지적건을 커버하는 결정적 A/B(LLM 노이즈 0)로 검증. 산출물 방치 버그(에이전트/사용자가 결과서 저장 누락→커밋 차단)라는 본래 목표는 R1–R4 전 구간 실증됨.
 
 ## 1. 근본원인 (재확인)
 D4 문서체계는 설계됐으나 **강제장치(forcing function)가 없다.** 외부리뷰엔 `check-review-tools.sh`+게이트가 있어 신뢰되는데, 문서기록엔 검증 스크립트도, 하드 체크리스트 게이트도, 기본값도(T0=_workspace만) 없다 → LLM이 과업 몰입 중 스킵. **구조가 아니라 강제가 문제.**

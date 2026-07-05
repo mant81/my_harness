@@ -37,7 +37,9 @@ if [ "$mode" = "--file" ]; then
   tier_is_slim "$tier" && { echo "ARTIFACTS: ok"; exit 0; }
   [ -z "$f" ] && { echo "ARTIFACTS: missing:no-file-arg"; exit 0; }
   if [ "$f" = "-" ]; then
-    tmp="$(mktemp 2>/dev/null || echo "/tmp/myh.$$")"; cat > "$tmp"; r="$(validate_file "$tmp")"; rm -f "$tmp"
+    # mktemp 없으면 안전 실패(예측가능 /tmp/…$$ 폴백은 symlink 공격 표면 — agy R4). O_EXCL 보장 위해 mktemp 강제.
+    tmp="$(mktemp 2>/dev/null)" || { echo "ARTIFACTS: missing:mktemp-unavailable"; exit 0; }
+    cat > "$tmp"; r="$(validate_file "$tmp")"; rm -f "$tmp"
   else
     r="$(validate_file "$f")"
   fi
