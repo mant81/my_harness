@@ -31,6 +31,18 @@
 - 결정적 pass/fail(LLM 실행 없이 hook 결정성 활용). anti-Goodhart: "존재"는 강제·게이밍 차단하되 "유용성"은 미보증(설계 한계 명시).
 - 스크립트: `skills/myharness/scripts/check-artifacts.sh`(끝줄 `ARTIFACTS: ok|missing:<사유>`, 항상 exit 0). hook은 이 끝줄 파싱해 커밋 차단.
 
+## 0-2. 외부감사 2R (codex+agy, 러너=claude 제외) — 결함 발견·수정·재실증
+초기 배선을 외부 독립 리뷰 2라운드로 적대 검증. **양 라운드 모두 실결함 발견(감사 정상 작동)** → 전건 실코드 대조 판정 후 수정 → 결정적 A/B 재실증.
+
+**Round 1 (확인):** ① stale-latest·`zzz.md` 알파벳 우회(멀티커밋서 이전 결과서로 통과) ② hook 경로 `$(dirname $0)`+팩토리경로 의존(자기완결 붕괴)·unquoted heredoc ③ `grep '/(_|template)'` 전체경로 매칭 → 조상 디렉토리(`_workspace`/`/x/_dev/`)에 걸려 **전 커밋 차단** ④ env 기본값 오작동 ⑤ 기존 hook `[ ! -e ]` 무음 스킵 ⑥ Tμ 대문자·heading regex·T2 주석.
+**Round 2 (확인·잔존/신규):** R2-a hook 스테이징 필터가 **또** 전체경로(프로젝트명 template/_ → 전차단) · R2-b **한글 파일명 quotepath 래핑 → `.md$` 매칭실패 → 한글 우선 하네스서 전 커밋 차단(critical)** · R2-c 외부 hook append 가 `exit 0`/`exec` 뒤 dead code · codex#2 subdir-noop 우회. **기각:** agy#3(xargs guard redundant — GNU xargs 빈입력 cwd-ls 반증).
+
+**수정 요지:** check-artifacts에 `--file` 모드(스테이징 결과서 직접 검증) + basename 필터 + mtime + heading 앵커. hook 2층 강제(`git diff --cached` 신규 결과서 스테이징 요구 + 그 파일 내용검증), `git -c core.quotepath=false`, awk basename 필터, 외부 hook **wrapper**(우리검사 우선 후 위임), 리터럴 baked.
+**보너스 자체발견:** installer `BODY="$(cat <<'HOOK'…)"` 캡처가 macOS **bash 3.2**서 중첩 heredoc+멀티라인+`set -u` 조합에 `unbound` 오류 → **heredoc 파일 직접 emit**(변수 캡처 제거)로 회피.
+
+**재실증 — L2 mock A/B v3 16/16 PASS:** 누락 차단·유효 통과·스텁 차단·**한글명 정상·template/`_` 프로젝트 정상·subdir-noop 차단·stale-latest 차단·외부hook wrapper(위임 보존)·멱등·slim(T0/Tμ) 무마찰**. 모두 결정적(LLM 노이즈 0).
+> 주: R2 이후 수정은 결정적 A/B(정확히 R2 지적건 커버)로 검증. 외부 3R 재감사는 미실행(2R 스코프) — 원하면 추가 가능.
+
 ## 1. 근본원인 (재확인)
 D4 문서체계는 설계됐으나 **강제장치(forcing function)가 없다.** 외부리뷰엔 `check-review-tools.sh`+게이트가 있어 신뢰되는데, 문서기록엔 검증 스크립트도, 하드 체크리스트 게이트도, 기본값도(T0=_workspace만) 없다 → LLM이 과업 몰입 중 스킵. **구조가 아니라 강제가 문제.**
 

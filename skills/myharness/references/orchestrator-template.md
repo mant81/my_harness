@@ -367,17 +367,65 @@ wait   # 여러 개 띄운 뒤
 **강제장치 = check-artifacts + pre-commit hook (프롬프트 강제 금지)**
 - `scripts/check-artifacts.sh <docs_dir> [tier]` — 결과서가 `docs/{project}/working_history/`에 실제 기록됐는지 + `## 다음 단계 참조` 블록(빈/스텁 false-pass 차단) 검증. 끝줄 `ARTIFACTS: ok | missing:<사유>`(항상 exit 0 — 상태는 끝줄로만, 파이프 안전). T0/Tμ = PASS(무마찰).
 - **왜 프롬프트 아님:** 체크리스트/게이트 호출을 오케스트레이터가 과업 몰입 중 스킵하고 "확인함" 할루시 → 무력(외부감사). → **런타임 물리 차단**: 생성 하네스가 타겟 레포에 `.git/hooks/pre-commit`을 설치, 이 hook이 `check-artifacts.sh` 끝줄을 파싱해 `missing:`이면 **커밋 거부**(exit 1). 결과서 없이는 물리적으로 커밋 불가.
-- **hook 설치(생성 하네스 초기화 시, 멱등):**
+- **설치 절차(생성 하네스 초기화 시 팩토리가 수행 — 멱등):**
+  1. **스크립트 번들:** `check-artifacts.sh`를 생성 하네스 자체 scripts 로 복사 — `.claude/skills/{하네스명}/scripts/`(Codex 런타임이면 `.agents/…`). hook 이 **팩토리(`skills/myharness/…`) 경로에 의존하면 안 됨**(자기완결 붕괴·팩토리 미설치 레포서 전 커밋 차단).
+  2. **리터럴 baked:** 팩토리는 생성 시 프로젝트명·티어·스크립트경로를 **아는** 값으로 hook 에 박는다. `MYH_PROJECT`/`MYH_TIER` env 는 *오버라이드용 폴백*일 뿐(미설정 시 리터럴). env 기본값 `project`/`t1`에 의존하면 실제 `docs/{실제명}`을 못 찾아 오작동.
+  3. **hook 생성 — heredoc 를 파일에 *직접 emit*(변수 캡처 금지):**
+  > ⚠️ `BODY="$(cat <<'HOOK'…)"` 로 캡처하면 macOS **bash 3.2**에서 *quoted heredoc 안에 중첩 heredoc(`<<STAGED`)+멀티라인 while + `set -u`* 조합이 `$project` 조기평가→`unbound variable` 오류를 낸다(자체 실측). → 함수로 감싸 `{ echo shebang; emit_body; } > "$H"` 로 **직접 쓴다**(command-sub 미사용 → 회피).
   ```bash
-  H="$(git rev-parse --git-path hooks)/pre-commit"; SK="$(dirname "$0")/skills/myharness/scripts/check-artifacts.sh"
-  if [ ! -e "$H" ]; then cat > "$H" <<EOF
-  #!/usr/bin/env bash
-  line="\$(bash "$SK" "\$(git rev-parse --show-toplevel)/docs/\${MYH_PROJECT:-project}" "\${MYH_TIER:-t1}" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
-  case "\$line" in ok) exit 0 ;; *) echo "COMMIT BLOCKED — 결과서 누락: \$line" >&2; echo "복구: docs/{project}/working_history/에 결과서(## 다음 단계 참조 포함) 작성 — 템플릿 references/templates/working-history-skeleton.md" >&2; exit 1 ;; esac
-  EOF
-  chmod +x "$H"; fi
+  H="$(git rev-parse --git-path hooks)/pre-commit"
+  MARK="# >>> myharness:check-artifacts >>>"
+  # 리터럴은 생성 시 팩토리가 치환({PROJECT}/{TIER}/{SCRIPTS}). quoted heredoc 라 설치시 조기평가 없음.
+  emit_body() {
+  cat <<'HOOK'
+  # >>> myharness:check-artifacts >>>
+  __myh() {
+    local root; root="$(git rev-parse --show-toplevel)"
+    local project="${MYH_PROJECT:-{PROJECT}}" tier="${MYH_TIER:-{TIER}}"
+    local chk="$root/{SCRIPTS}/check-artifacts.sh"
+    case "$(printf %s "$tier" | tr 'A-Z' 'a-z')" in t0|tμ|tµ|tmu) return 0 ;; esac
+    # ① 이 커밋이 working_history *직속*에 결과서를 스테이징했는가?
+    #    quotepath=false: 한글 파일명 "..." 래핑→.md 매칭실패→전커밋차단 방지(req).
+    #    diff-filter=AMR: 추가/수정/개명만. awk: basename 필터(경로 _/template 오탐 없음)+하위폴더(subdir-noop) 제외.
+    local pfx="docs/$project/working_history/"
+    local staged; staged="$(git -c core.quotepath=false diff --cached --name-only --diff-filter=AMR -- "$pfx" 2>/dev/null \
+      | awk -v p="$pfx" 'index($0,p)==1 { r=substr($0,length(p)+1); if (r ~ /\//) next; if (r ~ /^_/) next; if (r ~ /template/) next; if (r !~ /\.md$/) next; print }')"
+    if [ -z "$staged" ]; then
+      echo "COMMIT BLOCKED — 결과서 미스테이징: ${pfx}*.md 를 git add 하라." >&2
+      echo "복구: 결과서(## 다음 단계 참조 포함) 작성→git add. 템플릿: working-history-skeleton.md. (의도적 중간커밋이면 git commit --no-verify)" >&2
+      return 1
+    fi
+    # ② 스테이징된 결과서 *그 파일*을 직접 내용 검증(빈/스텁·subdir-noop·stale-latest false-pass 차단).
+    [ -f "$chk" ] || { echo "COMMIT BLOCKED — check-artifacts.sh 없음($chk) — 하네스 재설치 필요." >&2; return 1; }
+    local p line ok=0
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      line="$(bash "$chk" --file "$root/$p" "$tier" 2>/dev/null | sed -n 's/^ARTIFACTS: //p' | tail -1)"
+      [ "$line" = ok ] && { ok=1; break; }
+    done <<STAGED
+  $staged
+  STAGED
+    [ "$ok" = 1 ] && return 0
+    echo "COMMIT BLOCKED — 스테이징된 결과서 내용 불충분(200B 미만 또는 '## 다음 단계 참조' 누락)." >&2
+    return 1
+  }
+  __myh || exit 1
+  # <<< myharness:check-artifacts <<<
+  HOOK
+  }
+  if [ ! -e "$H" ]; then                                   # hook 없음 → 신규 작성
+    { echo '#!/usr/bin/env bash'; emit_body; } > "$H"; chmod +x "$H"
+  elif grep -qF "$MARK" "$H"; then :                       # 이미 설치 → no-op(멱등)
+  else                                                     # 외부 hook 존재 → wrapper(append 는 exit 0/exec 로 끝나면 dead code=R2-c)
+    mv "$H" "$H.local"                                     # 우리 검사 먼저 → 외부 hook 위임(종료코드 보존)
+    { echo '#!/usr/bin/env bash'; emit_body; printf '[ -x "%s.local" ] && "%s.local" "$@" || exit $?\n' "$H" "$H"; } > "$H"
+    chmod +x "$H"
+  fi
   ```
-  기존 hook 있으면 append/공존 검토(덮어쓰기 금지). `MYH_PROJECT`/`MYH_TIER` 환경변수로 프로젝트·티어 전달(미설정 시 project/t1). actionable FAIL(복구 힌트)로 에이전트 무한루프 방지.
+  > ⚠️ **heredoc 종료 토큰 `HOOK`·`STAGED` 는 실제 생성 시 행 맨앞(들여쓰기 0)**. 위 예시의 들여쓰기는 문서 가독용 — 오케스트레이터가 하네스에 박을 때 제거하라(`<<-` +탭 대안).
+  - `{PROJECT}`/`{TIER}`/`{SCRIPTS}`(예 `.claude/skills/{하네스명}/scripts`)는 **팩토리가 생성 시 리터럴 치환**. actionable FAIL(복구 힌트+`--no-verify` 안내)로 에이전트 무한루프 방지.
+  - **강제 2층:** ① 스테이징 강제(hook·git-aware — 커밋마다 working_history 직속 신규 결과서 요구) + ② **그 스테이징 파일 자체** 내용 검증(`--file`). "최신 하나"만 보는 stale-latest·zzz·subdir-noop 우회를 ①+②가 함께 막는다(외부감사 2R 반영).
+  - ⚠️ **heredoc 들여쓰기 주의:** 위 블록의 `<<STAGED … STAGED` 는 예시상 2칸 들여썼다. 실제 생성 시 **종료 토큰 `STAGED` 는 행 맨앞(들여쓰기 0)** 이거나 `<<-` + 탭이어야 한다 — 오케스트레이터가 하네스에 박을 때 들여쓰기를 제거하라.
 
 **실패 = fail-fast (동적 격상·소급 계획서 금지)**
 - Tμ/T1에서 에러 반복 시: 1회 재시도 실패 → 비파괴 롤백(`tdd-doctrine.md` 롤백 규율) + 사용자에게 보고하고 "단계형(T2)으로 재시작" 제안. 소급 계획서 생성·자동 격상 안 함.
