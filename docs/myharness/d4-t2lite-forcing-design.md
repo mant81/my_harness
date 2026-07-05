@@ -1,6 +1,21 @@
 # 설계서 — D4 T2-lite + 강제장치(check-artifacts) 문서체계 완성
 
-> 상태: **설계 제안(미구현)**. 자체검토 → 외부감사 통과 전 하네스 정본 미수정.
+> ## ✅ 외부감사 반영 — **최소안으로 축소 (아래 본문에 우선)**
+> 외부감사(codex+agy, 강수렴): 진단("구조 아니라 강제장치 부재")은 **타당 확인**. 단 **T2-lite 구조는 여전히 과설계** — 버그는 구조 없이 강제만으로 고쳐진다. 확정 축소:
+>
+> 1. **[핵심] 강제를 LLM이 아니라 런타임으로.** check-artifacts를 프롬프트/체크리스트에 두면 오케스트레이터가 **게이트 호출 자체를 스킵**하고 "확인했다" 할루시 → 무력화("강제의 강제" 문제). → **git `pre-commit` hook**(생성 하네스가 타겟에 설치)에 등록하여 결과서 없으면 **커밋을 물리적 차단**, 또는 external-review-loop 게이트 스크립트에 하드코딩. 프롬프트 규칙 아님.
+> 2. **[구조 축소] todo/·STATUS를 docs/에서 제거.** todo(체크박스 live)=git 커밋 노이즈(체크 하나에 diff), STATUS 수동=working_history와 이중상태(자동 rollup은 regex 파편화로 유지불가). → **docs/의 durable 정본 = `working_history/` 하나.** todo·STATUS는 필요 시 `_workspace/`(휘발) 또는 read-only 보조뷰(강제·정본 아님). design.md도 큰 작업만 선택.
+> 3. **[최소안] 버그는 기존 T1 강제만으로 해결.** T2-lite 복잡구조 불필요 — "T1 결과서 1장을 `docs/{project}/working_history/`에 쓰고 검증"이면 산출물 방치 버그가 고쳐짐. 설계를 **"T1 결과서 + 런타임 강제"**로 축소.
+> 4. **[누탐 방지] check-artifacts = grep 검사.** `ls` 존재만이면 빈파일/엉뚱파일 false-pass → **`## 다음 단계 참조` 블록 grep을 FAIL 조건**으로(내용 검증).
+> 5. **[격상] T2/문서무게 = 명시 플래그.** LLM 재량이면 편한 T1으로 다운그레이드 → `/myharness --tier2`·명시 지시일 때만 격상.
+> 6. **[캡] SKILL 500 포화** — 추가 금지, 기존 문구 **교체 + reference 이동**만. SKILL엔 "단계 마감 시 check-artifacts" 포인터 1줄(가능하면 기존 체크리스트 항목 교체).
+> 7. **[운영] actionable FAIL** — 커밋 차단 시 에러 끝줄에 "결과서 템플릿 경로 참조 복구" 힌트(에이전트 무한루프 방지).
+> 8. **[정합] Tμ와 로직 일치** — Tμ(current.md digest)도 check-artifacts가 일관 처리(누락 없게).
+>
+> **축소 결론:** T2-lite 구조(todo/STATUS/design 강제)는 **기각** → docs/ = working_history 정본 하나, 강제 = **git pre-commit hook + grep 검증 check-artifacts**, 격상 = 명시 플래그. 아래 §3~7의 todo/STATUS 강제 부분은 이 반영에 따라 *선택·휘발*로 격하.
+>
+> ---
+> 상태: **설계 제안(미구현·최소안 확정)**. 자체검토 → 외부감사 통과 전 하네스 정본 미수정.
 > 대상: `skills/myharness/references/orchestrator-template.md`(문서 체계 §), `templates/`(신규 골격), `skills/myharness/scripts/`(신규 `check-artifacts.sh`), `SKILL.md` 5-1·체크리스트.
 > 배경: 실사용에서 영속 산출물(design/plan/result)이 `docs/`에 안 가고 gitignored `_workspace`에 방치(→ cleanup/재실행 시 소멸·감사 이력 0). 사용자 T2 아이디어 외부감사(codex+agy 강수렴) 판정 = *문제의식 타당, 버전폴더/링크체인/general 강제는 기각, T2-lite로 축소 + 강제장치가 진짜 픽스*.
 
