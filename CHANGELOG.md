@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-05
+
+### Added
+
+- **D4 산출물 방치 강제장치 (check-artifacts + git pre-commit hook) 풀 배선** — 실사용에서 영속 산출물(결과서)이 `docs/{project}/`에 안 가고 gitignored `_workspace/`에 방치·소멸하던 버그. 근본원인(외부감사 수렴): 구조가 아니라 **강제장치(forcing function) 부재** — 프롬프트/체크리스트 강제는 오케스트레이터가 과업 몰입 중 스킵·"확인함" 할루시 가능. **해결: 런타임 물리 차단.** 신규 `scripts/check-artifacts.sh`(결과서가 `working_history/`에 기록됐는지 + `## 다음 단계 참조` 블록 검증, 끝줄 `ARTIFACTS: ok|missing:<사유>`, 항상 exit 0·파이프 안전) + 생성 하네스가 타겟 레포 `.git/hooks/pre-commit`에 설치하는 훅(결과서 미스테이징·검증 실패 시 커밋 물리 거부). 배선: `SKILL.md`(커밋순서 게이트·체크리스트, 500줄 캡 유지), `references/orchestrator-template.md`(훅 설치 절차), `harness-update.sh`(번들 화이트리스트), `factory-map.md`(✅ active), `templates/working-history-skeleton.md`(교훈→개선 섹션). L2 결정적 mock A/B로 실증(LLM 노이즈 0).
+
+### Changed
+
+- **강제 2층 + 외부감사 4라운드 경화** — `check-artifacts` `--file -`(stdin) 모드로 훅이 **스테이지 blob**(워킹트리 아님)을 `git show :path`로 검증. 훅은 ① `git diff --cached`로 커밋마다 `working_history` 직속 신규 결과서 스테이징 요구 + ② 그 blob 내용 검증. project·tier는 **baked 리터럴만**(env override 제거). 외부 hook 공존은 wrapper(우리 검사 우선→위임, 종료코드 보존).
+
+### Fixed
+
+- **외부감사 2R–4R 발견 결함 수정 (codex+agy, 러너 claude 제외)** — 각 라운드 실결함 발견→전건 실코드 대조 판정→결정적 A/B 재실증. 주요: 경로에 `_`/`template` 있으면 전 파일 false-fail→전 커밋 차단(basename 필터), **한글 파일명 quotepath 래핑→`.md` 매칭 실패→전 커밋 차단**(`git -c core.quotepath=false`), stale-latest·`zzz`·subdir-noop·**TOCTOU** 우회(스테이지 blob 검증), **project명 injection**(single-quote 리터럴+슬러그 제약), MYH_PROJECT/MYH_TIER env 우회(baked-only), symlink 결과서 위조(mode 120000 거부), wrapper 비실행 hook→전커밋차단·경로 injection(`printf %q`), mktemp symlink 공격(안전종료). macOS bash 3.2 중첩 heredoc+`set -u` 오류(heredoc 파일 직접 emit). 상세: `docs/myharness/d4-t2lite-forcing-design.md` §0-2.
+
 ## [1.2.3] - 2026-07-01
 
 ### Fixed

@@ -16,7 +16,7 @@
 
 **구성:** 에이전트 4(`doc-syncer`, `release-manager`, `skill-maintainer`, `repo-qa`) + 스킬 3(`doc-sync`, `release-flow`, `skill-authoring`) + 오케스트레이터(`repo-maintainer`). 모드: 에이전트 팀(생성-검증+파이프라인 하이브리드), 전원 `model: opus`. 상세는 각 `.claude/agents/*`, `.claude/skills/*`에서 단일 출처로 관리.
 
-**알려진 정합성 이슈:** 없음. 버전 1.1.0 정합(plugin=marketplace=badge=CHANGELOG), `bash skills/myharness/scripts/run-policy-audit.sh` PASS(warn 1=의도된 revfactory sibling 링크).
+**알려진 정합성 이슈:** 없음. 버전 1.3.0 정합(plugin=marketplace=badge×3=CHANGELOG), `bash skills/myharness/scripts/run-policy-audit.sh` PASS(fail 0, warn 0).
 
 ## 변경 이력
 | 날짜 | 변경 내용 | 대상 | 사유 |
