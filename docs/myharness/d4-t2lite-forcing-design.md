@@ -19,6 +19,18 @@
 > 대상: `skills/myharness/references/orchestrator-template.md`(문서 체계 §), `templates/`(신규 골격), `skills/myharness/scripts/`(신규 `check-artifacts.sh`), `SKILL.md` 5-1·체크리스트.
 > 배경: 실사용에서 영속 산출물(design/plan/result)이 `docs/`에 안 가고 gitignored `_workspace`에 방치(→ cleanup/재실행 시 소멸·감사 이력 0). 사용자 T2 아이디어 외부감사(codex+agy 강수렴) 판정 = *문제의식 타당, 버전폴더/링크체인/general 강제는 기각, T2-lite로 축소 + 강제장치가 진짜 픽스*.
 
+## 0-1. L2 mock A/B 실증 (가드레일 검증 — 결정적, LLM 노이즈 0)
+프로토타입(`scripts/check-artifacts.sh` + git pre-commit hook)으로 산출물 방치 버그를 A/B 재현·차단 검증. **6/6 PASS:**
+| 케이스 | 결과 |
+|--------|------|
+| **A(강제 없음)**: 결과서 누락 run | **커밋 성공 = 버그 재현** |
+| **B(hook)**: 결과서 누락 run | **커밋 차단 = 버그 예방** |
+| B: 유효 결과서 | 커밋 성공 |
+| B: 스텁/빈 결과서 | **여전히 차단**(`## 다음 단계 참조` grep + 최소 크기 → false-pass/게이밍 차단) |
+| T0 티어 | 문서 없이 PASS(slim 무마찰) |
+- 결정적 pass/fail(LLM 실행 없이 hook 결정성 활용). anti-Goodhart: "존재"는 강제·게이밍 차단하되 "유용성"은 미보증(설계 한계 명시).
+- 스크립트: `skills/myharness/scripts/check-artifacts.sh`(끝줄 `ARTIFACTS: ok|missing:<사유>`, 항상 exit 0). hook은 이 끝줄 파싱해 커밋 차단.
+
 ## 1. 근본원인 (재확인)
 D4 문서체계는 설계됐으나 **강제장치(forcing function)가 없다.** 외부리뷰엔 `check-review-tools.sh`+게이트가 있어 신뢰되는데, 문서기록엔 검증 스크립트도, 하드 체크리스트 게이트도, 기본값도(T0=_workspace만) 없다 → LLM이 과업 몰입 중 스킵. **구조가 아니라 강제가 문제.**
 
