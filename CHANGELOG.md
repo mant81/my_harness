@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-07-01
+
+### Fixed
+
+- **외부 리뷰 agy hang/speculative 결함 수정 (게이트 무결성 회복)** — agy 리뷰어가 repo 워킹트리 파일에 접근 못 해 근거 없는 speculative 판정 또는 hang→kill(exit 124/144)하던 결함. 근본원인: `--sandbox` + `--add-dir` 없음 → 리뷰 대상이 agy 워크스페이스 밖 → 파일 read가 권한 프롬프트 → `-p`(비대화)+`< /dev/null`(TTY 없음)+`--dangerously-skip-permissions` 없음 → 응답 불가 → 무한 대기. codex는 `codex exec` 자체 read-only라 무영향(대조군). **수정:** launcher agy 호출에 `--add-dir "$REPO_ROOT"`(`git rev-parse --show-toplevel`로 하위 디렉토리 실행서도 루트 보장) + `--dangerously-skip-permissions` 추가. 실증: 수정판으로 agy가 실제 파일 읽고 file:line 근거 판정+정상종료(exit 0) — 고친 배선으로 자기 자신을 리뷰 성공(dogfood). 대상: `skills/myharness/references/external-review-loop.md`.
+
+### Added
+
+- **상황별 리뷰 모델 선택 (`AGY_MODEL`/`CODEX_MODEL`)** — 오케스트레이터가 단계 리스크 등급에 맞춰 리뷰어 모델 선택: 경량/표준 → 경량·저비용(`Gemini 3.5 Flash (High)`/codex 기본), 중대 → 고성능(`Gemini 3.1 Pro (High)`/고추론). agy `--model`, codex `-m`. ⚠️ 엔진 다양성 런타임 강제 — `AGY_MODEL`이 Claude/GPT면 `exit 1`(agy를 러너와 같은 엔진으로 돌리는 자기검증 차단). 모델은 *엔진 내* 선택일 뿐 러너 제외 규칙은 불변.
+
+### Changed
+
+- **external-review-loop 하드닝 (수정 외부감사 반영)** — agy `--print-timeout` 600s→180s→**300s**(대형 리뷰+고추론 모델), gemini(legacy) 폴백은 `--add-dir`/`--dangerously-skip-permissions` 미지원(-s만)이라 **plain 롤백**(붙이면 unknown flag로 폴백 고장), agy read-only 플래그 부재 → **보안 잔여위험 명시**(sandbox+프롬프트 스코프+clean checkout 권장). 검증: `bash -n` PASS, 엔진 가드 동작, 정책 감사 PASS.
+
 ## [1.2.2] - 2026-06-30
 
 ### Added
