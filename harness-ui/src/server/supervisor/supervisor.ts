@@ -9,6 +9,7 @@ import { z } from "zod";
 import { writeJsonAtomic } from "../lib/atomic.js";
 import { Manifest, Status, AgentState, Event, isSchemaValid, type RunState } from "../schemas.js";
 import { writeOwner } from "./registry.js";
+import { identity } from "./osadapter.js";
 
 const iso = () => new Date().toISOString();
 
@@ -254,10 +255,15 @@ export async function spawnRun(runDir: string, cmd: string, args: string[], env:
     child.on("error", () => {}); // spawn ENOENT 등 async error uncaught → 서버 crash 방지(agy R5)
     const pid = child.pid ?? -1;
     child.unref();
+    // owner.startTime/groupId 는 실 identity 에서(reconcile 시 identity 대조가 일치하도록 — iso() 아님).
+    const id = await identity(pid);
     await writeOwner({
       runId: (JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8").catch(() => "{}")).runId) ?? "unknown",
-      pid, groupId: process.platform === "win32" ? `pid:${pid}` : pid,
-      startTime: iso(), exe: cmd, cwd: runDir, nonce: randomBytes(16).toString("hex"),
+      pid,
+      groupId: id?.groupId ?? (process.platform === "win32" ? `pid:${pid}` : pid),
+      startTime: id?.startTime ?? "",
+      exe: id?.exe ?? cmd,
+      cwd: runDir, nonce: randomBytes(16).toString("hex"),
     });
     return { pid };
   } finally {
