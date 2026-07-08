@@ -82,10 +82,11 @@ write_apply_manifest() {
   command -v jq >/dev/null 2>&1 || return 2
   local tmp="$MANIFEST.tmp.$$" first=1 rel current factory base fac_ver
   fac_ver="$(jq -r '.version // "unknown"' "$FACTORY/../../.claude-plugin/plugin.json" 2>/dev/null || echo unknown)"
-  printf '{"schema_version":"1","factory_version":"%s","files":{' "$fac_ver" > "$tmp" || return 1
+  printf '{"schema_version":"1","factory_version":"%s","files":{' "$fac_ver" > "$tmp" || { rm -f "$tmp"; return 1; }
 
-  for rel in $MANAGED_RELS; do
-    [ -f "$SKILL_DIR/$rel" ] || continue
+  # canonical `manifest` 와 동일하게 list_managed 를 단일 출처로(.local.* 필터 일관 — 향후 drift 방지).
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
     current="$(sha "$SKILL_DIR/$rel")"
     factory=""
     [ -f "$FACTORY/$rel" ] && factory="$(sha "$FACTORY/$rel")"
@@ -99,11 +100,13 @@ write_apply_manifest() {
 
     [ $first -eq 1 ] && first=0 || printf ',' >> "$tmp"
     printf '"%s":"%s"' "$rel" "$base" >> "$tmp"
-  done
+  done < <(list_managed "$SKILL_DIR")
   printf '}}\n' >> "$tmp"
 
-  if jq . "$tmp" > "$tmp.j" 2>/dev/null; then
-    mv "$tmp.j" "$MANIFEST" && rm -f "$tmp"
+  # 성공·실패 양쪽에서 temp 정리(mv 실패 시 $tmp·$tmp.j leak 방지).
+  if jq . "$tmp" > "$tmp.j" 2>/dev/null && mv "$tmp.j" "$MANIFEST"; then
+    rm -f "$tmp" "$tmp.j"
+    return 0
   else
     rm -f "$tmp" "$tmp.j"
     return 1
