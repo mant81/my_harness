@@ -233,9 +233,13 @@ async function loadAgent(runDir: string, name: string): Promise<AgentState | und
   try { const v = isSchemaValid(AgentState, JSON.parse(raw)); return v.ok ? v.value : undefined; } catch { return undefined; }
 }
 
+import type { ChildProcess } from "node:child_process";
+
 // child spawn — 로그파일 stdio(pipe 금지·EPIPE 자살 방지), spawn 후 supervisor fd close, owner 레지스트리 기록.
-export async function spawnRun(runDir: string, cmd: string, args: string[], env: Record<string, string> = {}): Promise<{ pid: number }> {
-  await mkdir(runDir, { recursive: true });
+// 반환 pid<=0 또는 identity null 이면 spawn 실패 → 호출측이 failed 처리(bogus owner 미기록).
+export type ExitInfo = { code: number | null; signal: string | null };
+export async function spawnRun(runDir: string, cmd: string, args: string[], env: Record<string, string> = {}): Promise<{ pid: number; child: ChildProcess | null; exited: Promise<ExitInfo> }> {
+  await mkdir(join(runDir, "agents"), { recursive: true }); // -o 출력 부모 생성(A: codex -o parent)
   const out = await open(join(runDir, RUN_LOG), "a");
   const errfh = await open(join(runDir, "raw.err.log"), "a");
   try {
@@ -253,21 +257,67 @@ export async function spawnRun(runDir: string, cmd: string, args: string[], env:
       shell: false,
     });
     child.on("error", () => {}); // spawn ENOENT 등 async error uncaught → 서버 crash 방지(agy R5)
-    const pid = child.pid ?? -1;
-    child.unref();
-    // owner.startTime/groupId 는 실 identity 에서(reconcile 시 identity 대조가 일치하도록 — iso() 아님).
-    const id = await identity(pid);
-    await writeOwner({
-      runId: (JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8").catch(() => "{}")).runId) ?? "unknown",
-      pid,
-      groupId: id?.groupId ?? (process.platform === "win32" ? `pid:${pid}` : pid),
-      startTime: id?.startTime ?? "",
-      exe: id?.exe ?? cmd,
-      cwd: runDir, nonce: randomBytes(16).toString("hex"),
+    // exit 를 **동기적으로** 캡처(await 이전) — 빠른 종료 이벤트 유실 방지(codex/agy R2).
+    const exited: Promise<ExitInfo> = new Promise((res) => {
+      child.once("exit", (code, signal) => res({ code: code ?? null, signal: signal ?? null }));
+      child.once("error", () => res({ code: -1, signal: null }));
     });
-    return { pid };
+    const pid = child.pid ?? -1;
+    if (pid <= 0) return { pid: -1, child: null, exited };
+    child.unref();
+    // post-spawn 부트스트랩(identity·owner) 실패는 **reject 금지** — 추적불가 detached child 방지 위해 kill 후 실패 반환.
+    try {
+      const id = await identity(pid);
+      if (!id) { try { child.kill("SIGKILL"); } catch { /* */ } return { pid: -1, child, exited }; } // identity 실패 → 좀비 제거
+      await writeOwner({
+        runId: (JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8").catch(() => "{}")).runId) ?? "unknown",
+        pid, groupId: id.groupId, startTime: id.startTime, exe: id.exe,
+        cwd: runDir, nonce: randomBytes(16).toString("hex"),
+      });
+      return { pid, child, exited };
+    } catch { try { child.kill("SIGKILL"); } catch { /* */ } return { pid: -1, child, exited }; }
   } finally {
     await out.close().catch(() => {}); // supervisor fd 복사본 close(누수 방지)
     await errfh.close().catch(() => {});
   }
+}
+
+// 실행 관리: spawn + 주기 ingest + child exit 시 최종 ingest·terminal status·owner 정리.
+// exit 는 spawnRun 이 동기 캡처한 exited 프로미스로 처리(유실 없음). 모든 콜백 try/catch(rejection→server crash 방지).
+export async function superviseRun(runDir: string, cmd: string, args: string[], env: Record<string, string> = {}): Promise<{ pid: number }> {
+  const { pid, child, exited } = await spawnRun(runDir, cmd, args, env);
+  if (pid <= 0 || !child) {
+    const st = await loadStatus(runDir);
+    st.state = "failed"; st.stateReason = "spawn-failed"; st.error = "spawn failed"; st.updatedAt = iso();
+    await writeStatus(runDir, st);
+    return { pid: -1 };
+  }
+  // running status 를 **먼저** 쓰고(exit 전), 감독 부착은 finally 로 보장.
+  // exited 는 (spawnRun 이 동기 캡처한) 프로미스라 이미 resolve 됐어도 이후 .then 이 유효 → 늦은 부착도 유실 없음.
+  // 순서상 running-write → (exit 시) finalize 가 뒤에 completed 를 써 clobber 없음(과거 reorder 경쟁 회피).
+  try {
+    const st = await loadStatus(runDir);
+    const cur = await import("./osadapter.js").then((m) => m.identity(pid)).catch(() => null);
+    st.state = st.state === "completed" || st.state === "failed" ? st.state : "running";
+    st.childPid = pid; st.childStartTime = cur?.startTime ?? null; st.childProcessGroupId = cur?.groupId ?? null; st.updatedAt = iso();
+    await writeStatus(runDir, st);
+  } catch { /* status write 실패 → 감독은 finally 에서 부착되어 finalize/ingest 가 이후 상태 기록 */ }
+  finally {
+    const timer = setInterval(() => { ingest(runDir).catch(() => {}); }, 500); // 주기 승격(rejection 무시)
+    exited.then((info) => finalize(runDir, info)).catch(() => {}).finally(() => clearInterval(timer));
+  }
+  return { pid };
+}
+
+async function finalize(runDir: string, info: ExitInfo): Promise<void> {
+  try {
+    await ingest(runDir); // 최종 승격
+    const f = await loadStatus(runDir);
+    if (!["completed", "failed", "cancelled", "stale"].includes(f.state)) f.state = info.code === 0 ? "completed" : "failed";
+    f.exitCode = info.code; f.exitSignal = info.signal; f.updatedAt = iso();
+    await writeStatus(runDir, f);
+    const { removeOwner } = await import("./registry.js");
+    const rid = JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8").catch(() => "{}")).runId;
+    if (rid) await removeOwner(rid);
+  } catch { /* finalize 오류 → 다음 reconcile 이 정리(server crash 방지) */ }
 }

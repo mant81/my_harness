@@ -57,6 +57,11 @@ export async function reconcileRun(
   }
   if (!opts.terminate) return { action: "none", reason: "verified-alive" };
 
+  // cancel TOCTOU: kill 직전 status 재확인 — 그새 terminal 되었으면 덮지 않음(멱등).
+  if (opts.finalState === "cancelled") {
+    const raw = await readFile(join(runDir, "status.json"), "utf8").catch(() => null);
+    if (raw) { const v = isSchemaValid(Status, (() => { try { return JSON.parse(raw); } catch { return null; } })()); if (v.ok && ["completed", "failed", "cancelled"].includes(v.value.state)) return { action: "none", reason: `raced-terminal(${v.value.state})` }; }
+  }
   const dead = await terminateTree(owner.groupId, owner.pid, { startTime: owner.startTime, exe: owner.exe });
   if (dead) { await setState(runDir, opts.finalState, "terminated-after-verify"); await removeOwner(runId); return { action: "killed", reason: "verified" }; }
   await setState(runDir, opts.finalState, "kill-incomplete"); // 종료 미확인 → owner 보존
@@ -64,5 +69,13 @@ export async function reconcileRun(
 }
 
 export async function cancelRun(runDir: string, runId: string): Promise<ReconcileResult> {
+  // terminal 상태면 멱등 — 재작성/재kill 안 함(완료/실패/취소된 run 을 cancelled 로 덮지 않음).
+  const raw = await readFile(join(runDir, "status.json"), "utf8").catch(() => null);
+  if (raw) {
+    const v = isSchemaValid(Status, (() => { try { return JSON.parse(raw); } catch { return null; } })());
+    if (v.ok && ["completed", "failed", "cancelled"].includes(v.value.state)) {
+      return { action: "none", reason: `already-terminal(${v.value.state})` };
+    }
+  }
   return reconcileRun(runDir, runId, { terminate: true, finalState: "cancelled" });
 }

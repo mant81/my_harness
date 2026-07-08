@@ -10,6 +10,9 @@ import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
 import { isSafeSegment, isWithinRoot } from "../lib/paths.js";
 import { deniedPath } from "../security.js";
+import { RunRequest, launchRun } from "../exec-run.js";
+import { cancelRun } from "../supervisor/reconcile.js";
+import { join as pjoin } from "node:path";
 
 const ARTIFACT_MAX = 8 * 1024 * 1024; // 8MB 상한
 
@@ -110,6 +113,18 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
         authenticated: "unknown", usage: { available: false, reason: "interactive slash command not available from non-TTY" },
       }])),
     };
+  });
+
+  // 실행(M5, 위험작업): Zod 검증 → dry-run(파일 미기록 미리보기) 또는 spawn.
+  app.post("/api/runs", async (req, reply) => {
+    const parsed = RunRequest.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid-request", detail: parsed.error.issues });
+    return launchRun(projectRoot, parsed.data);
+  });
+  app.post<{ Params: { runId: string } }>("/api/runs/:runId/cancel", async (req, reply) => {
+    if (!isSafeSegment(req.params.runId)) return reply.code(400).send({ error: "invalid-runId" });
+    const runDir = pjoin(projectRoot, "_workspace", "runs", req.params.runId);
+    return cancelRun(runDir, req.params.runId);
   });
 
   app.get("/api/health", async () => ({ ok: true }));
