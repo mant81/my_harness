@@ -19,6 +19,16 @@ export function makeSecurity(port: number): SecurityState {
   return { bootstrap: randomBytes(32).toString("hex"), bootstrapUsed: false, session: randomBytes(32).toString("hex"), port };
 }
 
+// bootstrap 회전 — **write-then-publish**: 새 토큰 파일 기록 성공 후에만 in-memory 교체(파일↔메모리 불일치 방지).
+async function rotateBootstrap(sec: SecurityState): Promise<void> {
+  const next = randomBytes(32).toString("hex");
+  try {
+    const { writeBootstrap } = await import("./launcher.js");
+    await writeBootstrap(next);          // 파일 먼저
+    sec.bootstrap = next; sec.bootstrapUsed = false; // 성공 후 메모리 발행
+  } catch { /* 파일 실패 → 기존 bootstrap 유지(used=true 상태로 남아 재교환 불가, 다음 부팅서 갱신) */ }
+}
+
 function allowedHost(host: string | undefined, port: number): boolean {
   if (!host) return false;
   return host === `127.0.0.1:${port}` || host === `localhost:${port}` || host === `[::1]:${port}`;
@@ -43,7 +53,8 @@ export function registerSecurity(app: FastifyInstance, sec: SecurityState): void
     if (!allowedOrigin(req.headers.origin, sec.port)) return reply.code(403).send({ error: "bad-origin" });
     const b = req.body?.bootstrap ?? "";
     if (sec.bootstrapUsed || !eq(b, sec.bootstrap)) return reply.code(401).send({ error: "invalid-bootstrap" });
-    sec.bootstrapUsed = true; // 즉시 무효화(single-use)
+    sec.bootstrapUsed = true;                 // 즉시 무효화(single-use)
+    void rotateBootstrap(sec);                // 새 bootstrap 발급·파일 갱신(런처 재접속 A31용)
     return { session: sec.session };
   });
 

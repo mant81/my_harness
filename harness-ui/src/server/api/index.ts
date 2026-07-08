@@ -69,10 +69,21 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
     const rel = req.params["*"] ?? "";
     const segs = rel.split("/");
     if (segs.length === 0 || !segs.every(isSafeSegment) || deniedPath(rel)) return reply.code(400).send({ error: "invalid-path" });
-    const base = join(projectRoot, "_workspace", "runs", req.params.runId, "artifacts");
+    const runsRoot = join(projectRoot, "_workspace", "runs");
+    const base = join(runsRoot, req.params.runId, "artifacts");
     const target = join(base, ...segs);
     if (!isWithinRoot(base, target)) return reply.code(400).send({ error: "out-of-bounds" });
-    // leaf O_NOFOLLOW 로 먼저 open(check-reopen TOCTOU 제거). 그 뒤 fstat(크기·정규) + realpath 를 projectRoot 에 앵커.
+    // 앵커를 **walk 이전에 선계산**(base swap 창 축소, agy R4). realBase 가 project 내여야.
+    const realRoot = await realpath(projectRoot);
+    const realBase = await realpath(base).catch(() => null);
+    if (!realBase || !isWithinRoot(realRoot, realBase)) return reply.code(400).send({ error: "bad-base" });
+    // **base 컴포넌트(runId·artifacts)부터** leaf 부모까지 전 경로 symlink 구조적 거부(base-symlink→in-project 노출 차단).
+    const walk = [join(runsRoot, req.params.runId), base, ...segs.slice(0, -1).map((_, i) => join(base, ...segs.slice(0, i + 1)))];
+    for (const seg of walk) {
+      const l = await lstat(seg).catch(() => null);
+      if (!l || l.isSymbolicLink()) return reply.code(400).send({ error: "symlink-in-path" });
+    }
+    // leaf O_NOFOLLOW 로 먼저 open(check-reopen TOCTOU 제거). 그 뒤 fstat(크기·정규) + realpath 이중 앵커.
     let fh;
     try { fh = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); }
     catch { return reply.code(404).send({ error: "not-found" }); }
@@ -80,9 +91,9 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
       const st = await fh.stat();
       if (!st.isFile()) return reply.code(404).send({ error: "not-file" });
       if (st.size > ARTIFACT_MAX) return reply.code(413).send({ error: "too-large" });
-      // 부모 세그먼트 symlink 탈출 방지 — realpath(target) 가 realpath(projectRoot) 하위인지.
+      // target 이 (선계산된) realBase 내인지 — 내부 symlink→타경로 차단.
       const real = await realpath(target);
-      if (!isWithinRoot(await realpath(projectRoot), real)) return reply.code(400).send({ error: "escape" });
+      if (!isWithinRoot(realBase, real)) return reply.code(400).send({ error: "escape" });
       // dev/ino 바인딩: open 한 fd 와 현재 경로가 같은 inode 인지(open↔check 사이 부모 swap 탐지).
       const l = await lstat(target).catch(() => null);
       if (!l || l.ino !== st.ino || l.dev !== st.dev) return reply.code(409).send({ error: "path-changed" });
@@ -128,4 +139,6 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   });
 
   app.get("/api/health", async () => ({ ok: true }));
+  // /healthz — **비인증 liveness**(/api/ 아니므로 게이트 통과). 런처 멱등 판정용. 데이터 없음.
+  app.get("/healthz", async () => ({ ok: true }));
 }

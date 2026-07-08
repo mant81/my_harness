@@ -23,15 +23,16 @@ describe("보안 미들웨어 (§5b)", () => {
     const r = await app.inject({ method: "GET", url: "/api/harness", headers: { host: "evil.com", authorization: `Bearer ${sec.session}` } });
     expect(r.statusCode).toBe(403);
   });
-  it("A12: bootstrap→session 교환 후 접근, bootstrap 재사용 불가", async () => {
+  it("A12: bootstrap→session 교환 후 접근, **동일 bootstrap 재사용 불가**(rotate)", async () => {
     const { app, sec } = server();
-    const ex = await app.inject({ method: "POST", url: "/api/auth/exchange", headers: { host: HOST, origin: ORIGIN }, payload: { bootstrap: sec.bootstrap } });
+    const b1 = sec.bootstrap; // 최초 bootstrap 포착(교환 후 rotate 되므로)
+    const ex = await app.inject({ method: "POST", url: "/api/auth/exchange", headers: { host: HOST, origin: ORIGIN }, payload: { bootstrap: b1 } });
     expect(ex.statusCode).toBe(200);
     const session = ex.json().session;
     const ok = await app.inject({ method: "GET", url: "/api/harness", headers: { host: HOST, authorization: `Bearer ${session}` } });
     expect(ok.statusCode).toBe(200);
-    // 재사용 차단(single-use)
-    const again = await app.inject({ method: "POST", url: "/api/auth/exchange", headers: { host: HOST, origin: ORIGIN }, payload: { bootstrap: sec.bootstrap } });
+    // 최초 bootstrap(b1) 재사용 → 401(single-use·rotate 후 무효)
+    const again = await app.inject({ method: "POST", url: "/api/auth/exchange", headers: { host: HOST, origin: ORIGIN }, payload: { bootstrap: b1 } });
     expect(again.statusCode).toBe(401);
   });
   it("A10: state-mutating cross-origin POST 거부(Origin)", async () => {

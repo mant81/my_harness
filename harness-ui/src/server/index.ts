@@ -22,8 +22,9 @@ if (isMain) {
   const port = Number.parseInt(process.env.PORT ?? "5174", 10);
   const security = makeSecurity(port);
   const app = buildServer({ security });
-  app.listen({ host: "127.0.0.1", port }).then(() => {
-    // 토큰은 fragment 로만 전달(쿼리·로그 미노출). bootstrap URL 은 별도 안내(런처 M6).
+  app.listen({ host: "127.0.0.1", port }).then(async () => {
+    const { writeBootstrap } = await import("./launcher.js");
+    await writeBootstrap(security.bootstrap).catch(() => {}); // 런처가 읽을 0600 파일(토큰은 stdout 미출력)
     process.stdout.write(`harness-ui api on http://127.0.0.1:${port} (bootstrap via launcher)\n`);
   }).catch((e) => { process.stderr.write(String(e) + "\n"); process.exit(1); });
 }
