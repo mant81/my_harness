@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve, relative, isAbsolute, sep } from "node:path";
 
 export function stateHome(): string {
+  if (process.env.HARNESS_STATE_HOME) return process.env.HARNESS_STATE_HOME; // 테스트/오버라이드
   const home = homedir();
   switch (process.platform) {
     case "darwin": return join(home, "Library", "Application Support", "harness-ui");
