@@ -92,3 +92,18 @@ export function deniedPath(rel: string): boolean {
   if (/ui-session-token|\.owner\.json|session\.key|registry/i.test(rel)) return true;
   return false;
 }
+
+// F5 docs 뷰어 전용 denylist (DV5·V5 정정). `deniedPath` 의 `/registry/i` 부분일치 오거부를
+// docs 에 쓰지 않는다 — `docs/registry-*.md`·본문 "registry"/"session" 포함 정상문서는 ACCEPT.
+// 커버: (a) DENY = dot-prefix 세그먼트(.env/.git/.ssh/.aws)·node_modules·.git (재사용)
+//       (b) 확장자 기반 secret: *.key/*.pem/*.p12/*.pfx/*.crt/*.cer (비-dot foo.key 도 차단)
+//       (c) 비-dot 개인키 파일명: id_rsa*/id_dsa*/id_ecdsa*/id_ed25519* (세그먼트 앵커)
+//       (d) 토큰 파일명: ui-session-token (세그먼트 앵커)
+const DOCS_DENY_EXT = /\.(key|pem|p12|pfx|crt|cer)$/i;
+const DOCS_DENY_NAME = /(^|\/)(id_rsa|id_dsa|id_ecdsa|id_ed25519|ui-session-token)([._-][^/]*)?(\/|$)/i;
+export function deniedDocsPath(rel: string): boolean {
+  if (DENY.test(rel)) return true;        // dot-prefix·node_modules·.git (재사용 — 재발명 아님)
+  if (DOCS_DENY_EXT.test(rel)) return true;
+  if (DOCS_DENY_NAME.test(rel)) return true;
+  return false;
+}

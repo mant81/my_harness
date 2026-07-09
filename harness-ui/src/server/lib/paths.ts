@@ -14,10 +14,22 @@ export function stateHome(): string {
 
 export const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
-// 경로 세그먼트 allowlist (빈/`.`/`..`/메타 거부).
+// 경로 세그먼트 allowlist (빈/`.`/`..`/메타 거부). 엄격 ASCII(runId·artifact 등) — 불변.
 export function isSafeSegment(seg: string): boolean {
   if (!seg || seg === "." || seg === "..") return false;
   return SAFE_SEGMENT.test(seg);
+}
+
+// docs 뷰어 전용 세그먼트 검증(트리↔열람 정합·MED). 유니코드·공백 허용하되 traversal 은 차단.
+// isSafeSegment(엄격 ASCII) 는 그대로 두고, 한글·공백 결과서 파일명이 트리에 보이면 반드시 열리게 한다.
+// 거부: 빈 문자열·`.`·`..`·path separator(`/`,`\`)·null·제어문자(0x00-0x1F).
+export function isSafeDocsSegment(seg: string): boolean {
+  if (!seg || seg === "." || seg === "..") return false;
+  if (seg.includes("/") || seg.includes("\\")) return false;
+  for (let i = 0; i < seg.length; i++) {
+    if (seg.charCodeAt(i) <= 0x1f) return false; // null(0x00) 포함 제어문자
+  }
+  return true;
 }
 
 // resolved 경로가 root 하위인지 (경계 검사). realpath는 호출측에서 fd 앵커링과 함께.

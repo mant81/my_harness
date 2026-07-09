@@ -1,8 +1,14 @@
-// 8화면(§IA: Overview·Build·Agents·Skills·Runs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
-// XSS: 전 텍스트 React escape. innerHTML/dangerouslySetInnerHTML 미사용. 사용자 입력은 서버 Zod 재검증.
+// 9화면(§IA: Overview·Build·Agents·Skills·Runs·Docs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
+// XSS: 전 텍스트 React escape. dangerouslySetInnerHTML 는 오직 renderMarkdown(markdown-it html:false + DOMPurify) 통과분에만(F5 DV8).
 import { useState, useEffect } from "react";
 import { useApi, Async, Badge, Card, Table } from "./ui.js";
-import { apiPost, fetchArtifact } from "./api.js";
+import {
+  apiPost, fetchArtifact, downloadDoc, downloadArtifact,
+  encodeDocPath, DownloadTooLargeError,
+  type DocsNode, type DocsTree, type DocPreview,
+} from "./api.js";
+import { renderMarkdown } from "./render.js";
+import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath } from "./docs-view.js";
 import {
   type RunsFilter, type RunsQueryResult, type ChipField,
   parseQuery, buildQuery, setField, clearField, clearAll, activeChips, hasActiveFilter,
@@ -55,9 +61,11 @@ export function Overview() {
           </Card>
           <Card title="D4 규율 (A36) · 업데이트 (A37)">
             <Table cols={["프로젝트", "결과서", "다음단계 누락"]} rows={s.d4.projects.map((p) => [
-              p.project, p.resultDocs, p.missingNextStep ? <Badge kind="err">{p.missingNextStep}</Badge> : <Badge kind="ok">0</Badge>,
+              // A59: 결과서(docs/) 클릭 → Docs 뷰어 진입
+              <a className="link" href="#/docs" title="Docs 뷰어에서 결과서 열람">{p.project}</a>,
+              p.resultDocs, p.missingNextStep ? <Badge kind="err">{p.missingNextStep}</Badge> : <Badge kind="ok">0</Badge>,
             ])} />
-            <p className="muted">_workspace 방치: {s.d4.workspaceAbandoned} · manifest: {String(s.update.manifest)} · factoryDrift: {s.update.factoryDrift}</p>
+            <p className="muted">_workspace 방치: {s.d4.workspaceAbandoned} · manifest: {String(s.update.manifest)} · factoryDrift: {s.update.factoryDrift} · <a className="link" href="#/docs">문서 뷰어 열기 →</a></p>
           </Card>
           <Card title="진화 이력 (A38)">
             <Table cols={["날짜", "변경", "출처"]} rows={s.evolution.slice(-12).reverse().map((e) => [e.date, e.change, e.source])} />
@@ -310,7 +318,21 @@ function RunDetail({ runId }: { runId: string }) {
   const ev = useApi<{ items: Array<{ seq: number; event: string; message?: string }>; nextAfter: number; hasMore: boolean; runState: string | null; schemaVersion: string }>(`/api/runs/${encodeURIComponent(runId)}/events`);
   const ag = useApi<{ agents: Array<{ name: string; state: string }> }>(`/api/runs/${encodeURIComponent(runId)}/agents`);
   const arts = useApi<{ files: string[] }>(`/api/runs/${encodeURIComponent(runId)}/artifacts`);
-  const [art, setArt] = useState<string>("");
+  const set = useApi<{ projectRoot: string }>("/api/settings");
+  const [artName, setArtName] = useState<string | null>(null);
+  const [artText, setArtText] = useState<string | null>(null);
+  const [artErr, setArtErr] = useState<React.ReactNode>(null);
+  const projectRoot = set.data?.projectRoot ?? "";
+  const openArt = (name: string) => {
+    setArtName(name); setArtText(null); setArtErr(null);
+    fetchArtifact(runId, name)
+      .then(setArtText)
+      .catch((e) => {
+        if (e instanceof DownloadTooLargeError)
+          setArtErr(<>⚠ 파일이 너무 큼 · 로컬에서 열기: <code className="path">{localArtifactPath(projectRoot, runId, name)}</code></>);
+        else setArtErr(<>불러오기 실패: {String(e)}</>);
+      });
+  };
   return (
     <Card title={runId.slice(0, 40)}>
       <Async state={run}>{(r) => (
@@ -322,14 +344,163 @@ function RunDetail({ runId }: { runId: string }) {
           <div key={x.seq} className="evline"><span className="seq">#{x.seq}</span> <b>{x.event}</b> {x.message}</div>
         ))}</div>
       ); }}</Async>
+      {/* A83: 산출물 패널은 트리·이벤트와 독립 로딩. 한 산출물 실패(413/오류)가 다른 패널 미붕괴 */}
       <Async state={arts}>{(f) => f.files.length > 0 ? (
         <div>
           <p className="muted">산출물:</p>
-          {f.files.map((name) => <button key={name} className="link" onClick={() => fetchArtifact(runId, name).then(setArt).catch((e) => setArt(String(e)))}>{name}</button>)}
-          {art && <pre className="out">{art.slice(0, 4000)}</pre>}
+          <div className="artlist">
+            {f.files.map((name) => (
+              <button key={name} className={"link" + (name === artName ? " on" : "")} aria-current={name === artName ? "true" : undefined}
+                onClick={() => openArt(name)}>📄 {name}</button>
+            ))}
+          </div>
+          {artErr && <p className="banner err" role="alert">{artErr}</p>}
+          {artName && artText != null && !artErr && (
+            <FileViewer model={{
+              name: artName, content: artText, renderable: true, binary: false, truncated: false,
+              size: artText.length, localPath: localArtifactPath(projectRoot, runId, artName),
+              download: () => downloadArtifact(runId, artName),
+            }} />
+          )}
         </div>
       ) : <p className="muted">산출물 없음</p>}</Async>
     </Card>
+  );
+}
+
+// ── F5 공유 뷰어 컴포넌트 (A59·A89·A98·DV8) ──
+// docs 미리보기·run artifact 를 공통 렌더. 렌더↔raw 토글·다운로드·잘림/바이너리/413 배너. 읽기전용.
+type ViewerModel = {
+  name: string; content: string | null; renderable: boolean; binary: boolean;
+  truncated: boolean; size: number; localPath: string; download: () => Promise<void>;
+};
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function FileViewer({ model }: { model: ViewerModel }) {
+  const mdEligible = isMarkdownName(model.name) && model.renderable && model.content != null;
+  const [mode, setMode] = useState<"render" | "raw">(mdEligible ? "render" : "raw");
+  const [dlErr, setDlErr] = useState<React.ReactNode>(null);
+  const [busy, setBusy] = useState(false);
+  // 파일 전환 시 토글/에러 초기화(A89 — 새 파일은 렌더 기본).
+  useEffect(() => { setMode(mdEligible ? "render" : "raw"); setDlErr(null); }, [model.name]); // eslint-disable-line react-hooks/exhaustive-deps
+  const banner = viewerBanner(model);
+  const doDownload = async () => {
+    setBusy(true); setDlErr(null);
+    try { await model.download(); }
+    catch (e) {
+      if (e instanceof DownloadTooLargeError)
+        setDlErr(<>파일이 너무 큼({fmtBytes(e.size)} · 상한 {fmtBytes(e.max)}) — 로컬에서 열기: <code className="path">{model.localPath}</code></>);
+      else setDlErr(<>다운로드 실패: {String(e)}</>);
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="viewer">
+      <div className="viewer-toolbar">
+        {mdEligible && (
+          <div className="seg-toggle" role="group" aria-label="표시 방식">
+            <button className={mode === "render" ? "on" : ""} aria-pressed={mode === "render"} onClick={() => setMode("render")}>렌더</button>
+            <button className={mode === "raw" ? "on" : ""} aria-pressed={mode === "raw"} onClick={() => setMode("raw")}>원문(raw)</button>
+          </div>
+        )}
+        <span className="viewer-size muted">{fmtBytes(model.size)}</span>
+        <button className="dl-btn" disabled={busy} onClick={doDownload}>{busy ? "다운로드 중…" : "⤓ 다운로드"}</button>
+      </div>
+      {model.truncated && <p className="banner warn" role="note">✂ 미리보기 잘림(상한까지 표시) · 전체 내용은 다운로드로 확인</p>}
+      {dlErr && <p className="banner err" role="alert">⚠ {dlErr}</p>}
+      {banner === "binary" && <p className="banner" role="note">⛔ 미리보기 불가(바이너리) · 다운로드로 확인</p>}
+      {banner === "not-renderable" && <p className="banner" role="note">⛔ 미리보기 불가(이 형식) · 다운로드로 확인</p>}
+      {!banner && model.content != null && (
+        mode === "render" && mdEligible
+          // DV8: renderMarkdown(markdown-it html:false + DOMPurify allowlist + scheme 화이트리스트 + img/svg 차단) 통과분만 주입.
+          ? <div className="md-body" dangerouslySetInnerHTML={{ __html: renderMarkdown(model.content) }} />
+          // raw/텍스트는 React escape(비실행).
+          : <pre className="out">{model.content}</pre>
+      )}
+    </div>
+  );
+}
+
+// 파일 트리(재귀·읽기전용·A89). 키보드 조작(button)·현재 선택 aria-current.
+function DocTree({ nodes, selected, onSelect }: { nodes: DocsNode[]; selected: string | null; onSelect: (path: string) => void }) {
+  return (
+    <ul className="doctree" role="tree">
+      {nodes.map((n) => n.type === "dir" ? (
+        <li key={n.path} role="treeitem" aria-expanded="true">
+          <span className="tree-dir">📁 {n.name}</span>
+          {n.children.length > 0 && <DocTree nodes={n.children} selected={selected} onSelect={onSelect} />}
+        </li>
+      ) : (
+        <li key={n.path} role="none">
+          <button role="treeitem" className={"tree-file link" + (n.path === selected ? " on" : "")}
+            aria-current={n.path === selected ? "true" : undefined} onClick={() => onSelect(n.path)}>📄 {n.name}</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// 브레드크럼(A89) — 읽기전용 경로 표시.
+function Breadcrumb({ rel }: { rel: string }) {
+  const trail = breadcrumbTrail(rel);
+  return (
+    <nav className="breadcrumb" aria-label="파일 경로">
+      {trail.map((t, i) => (
+        <span key={t.path}>
+          {i > 0 && <span className="sep" aria-hidden="true"> / </span>}
+          <span className={i === trail.length - 1 ? "crumb cur" : "crumb"}>{t.name}</span>
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+// docs 파일 미리보기 패널 — 트리와 독립 로딩(A83). 3-state.
+function DocPanel({ rel, projectRoot }: { rel: string; projectRoot: string }) {
+  const prev = useApi<DocPreview>(`/api/docs/${encodeDocPath(rel)}`);
+  return (
+    <Card title={rel}>
+      <Breadcrumb rel={rel} />
+      <Async state={prev}>{(p) => (
+        <FileViewer model={{
+          name: p.name, content: p.content, renderable: p.renderable, binary: p.binary,
+          truncated: p.truncated, size: p.size, localPath: localDocPath(projectRoot, rel),
+          download: () => downloadDoc(rel, p.name),
+        }} />
+      )}</Async>
+    </Card>
+  );
+}
+
+// ── 6. Docs (F5·A53·A59·A89·A98 — 문서/artifact 뷰어) ──
+export function Docs() {
+  const tree = useApi<DocsTree>("/api/docs");
+  const set = useApi<{ projectRoot: string }>("/api/settings");
+  const [sel, setSel] = useState<string | null>(null);
+  return (
+    <div className="screen">
+      <h2>Docs</h2>
+      <div className="split">
+        {/* A83: 트리 패널은 미리보기와 독립 로딩. 미리보기 실패가 트리를 무너뜨리지 않음 */}
+        <Card title="문서 트리 · docs/ (읽기전용)">
+          <Async state={tree}>{(t) => t.tree.length === 0 ? (
+            <div className="empty" role="status"><p className="muted">📂 docs/ 에 문서 없음</p></div>
+          ) : (
+            <>
+              {t.truncated && <p className="banner warn" role="note">✂ 트리 절단 · {t.count}개까지 표시</p>}
+              <DocTree nodes={t.tree} selected={sel} onSelect={setSel} />
+            </>
+          )}</Async>
+        </Card>
+        {sel
+          ? <DocPanel key={sel} rel={sel} projectRoot={set.data?.projectRoot ?? ""} />
+          : <Card title="미리보기"><p className="muted">좌측에서 파일을 선택하세요.</p></Card>}
+      </div>
+    </div>
   );
 }
 

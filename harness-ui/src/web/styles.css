@@ -65,3 +65,38 @@ td { word-break:break-word; }
 .empty .link { margin-top:8px; }
 /* A92: 포커스 링 가시(색 대비 AA) */
 :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+/* F5 문서/artifact 뷰어 (A59·A89·A98·DV8) */
+.doctree { list-style:none; margin:0; padding:0 0 0 4px; }
+.doctree .doctree { padding-left:16px; border-left:1px solid var(--line); margin-left:6px; }
+.doctree li { margin:2px 0; }
+.tree-dir { color:var(--muted); font-size:13px; }
+.tree-file { font-size:13px; }
+.tree-file.on { font-weight:700; text-decoration:underline; }
+.breadcrumb { font-size:12px; color:var(--muted); margin-bottom:10px; word-break:break-word; }
+.breadcrumb .crumb.cur { color:var(--fg); font-weight:600; }
+.breadcrumb .sep { color:var(--line); }
+.viewer { display:flex; flex-direction:column; gap:10px; }
+.viewer-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.viewer-size { font-size:12px; margin-left:auto; }
+.seg-toggle { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+.seg-toggle button { background:var(--bg); color:var(--fg); border:none; padding:5px 12px; font:inherit; cursor:pointer; }
+.seg-toggle button.on { background:var(--accent); color:#0b0d12; font-weight:600; }
+.dl-btn { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+.dl-btn:disabled { opacity:.5; cursor:not-allowed; }
+.artlist { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:8px; }
+.artlist .link.on { font-weight:700; text-decoration:underline; }
+/* 배너: 색 단독 아닌 아이콘+텍스트(A92) */
+.banner { border:1px solid var(--line); border-radius:6px; padding:8px 12px; font-size:13px; margin:0; background:var(--bg); }
+.banner.warn { border-color:var(--warn); color:var(--warn); }
+.banner.err { border-color:var(--err); color:var(--err); }
+.banner .path,.path { font-family:ui-monospace,monospace; font-size:12px; color:var(--fg); word-break:break-all; }
+/* DV8 sanitize 통과 마크다운 렌더 본문 */
+.md-body { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:14px 16px; overflow-x:auto; word-break:break-word; }
+.md-body h1,.md-body h2,.md-body h3 { margin:12px 0 8px; }
+.md-body :first-child { margin-top:0; }
+.md-body pre { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:10px; overflow-x:auto; }
+.md-body code { font-family:ui-monospace,monospace; font-size:12px; }
+.md-body a { color:var(--accent); }
+.md-body table { margin:8px 0; }
+.md-body blockquote { border-left:3px solid var(--line); margin:8px 0; padding-left:12px; color:var(--muted); }

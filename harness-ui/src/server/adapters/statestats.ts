@@ -8,7 +8,7 @@ const MAX_DOCS = 1000;        // 프로젝트당 결과서 스캔 상한
 const MAX_DOC_BYTES = 262144; // 파일당 read 상한(256KB)
 
 async function exists(p: string): Promise<boolean> { try { await stat(p); return true; } catch { return false; } }
-async function notSymlinkDir(dir: string): Promise<boolean> {
+export async function notSymlinkDir(dir: string): Promise<boolean> {
   try { const l = await lstat(dir); return l.isDirectory() && !l.isSymbolicLink(); } catch { return false; }
 }
 async function listMd(dir: string): Promise<string[]> {

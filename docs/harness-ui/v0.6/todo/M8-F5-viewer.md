@@ -1,5 +1,12 @@
 # M8 — F5 문서/artifact 뷰어 작업계획서 (체크리스트)
 
+> ✅ **완료(2026-07-09).** 구현·게이트·QA·배선·외부감사 전부 통과. 전 체크박스 완료.
+> - **게이트:** typecheck PASS · `npm run test` **247/247 PASS**(29 파일) · build PASS · v0.5 회귀 0.
+> - **경로탈출·XSS 중대 방어:** DV1~DV9 — `openSafeFile` 공용 경화 리더(화이트루트·per-seg·realpath 이중앵커·전 세그먼트 lstat 심링크 무조건거부·O_NOFOLLOW·dev/ino·**post-walk 재검증 TOCTOU 폐쇄**)·docs 트리 realpath containment(junction 방어)·`deniedDocsPath`(secret 거부·정상문서 ACCEPT)·`isSafeDocsSegment`(유니코드 파일명·트리↔열람 정합)·413 스트림 前·바이너리 stream decode. **DV8 XSS:** 클라 markdown-it(html:false)+DOMPurify+scheme 화이트리스트+외부리소스 차단+CSP+nosniff — XSS 거부 스위트 DOM 파싱 기반 전건 무력화.
+> - **QA·배선:** 경계면 0·dead link 0·거부 스위트 전건 fail-closed·XSS 무력화·runtime deps(markdown-it/dompurify) advisory 0.
+> - **외부감사(codex+agy) R1~R3 → 최종 HIGH 0(양 엔진):** R1 중간 세그먼트 TOCTOU·docs 유니코드 파일명, R2 트리 junction containment·바이너리 오판 순차 해소. 원장: `_workspace/reviews/m8-code-r*`.
+
+
 > 정본: `docs/harness-ui/v0.6/design/design-v0.6.md` §F5.1~F5.4 · DV1~DV9 · A53~A59 · A89 · A98 · §위협 스위트 F5-뷰어.
 > 이 문서는 **계획(체크리스트)**. 구현·커밋은 server-builder / web-builder 몫. 코드 예시는 판정 근거로만 파일:라인 인용.
 
@@ -16,79 +23,79 @@
 
 ## 선행/선검증 (착수 전 — 가정 위 구현 금지)
 
-- [ ] **AS4(Windows 심링크/junction) 선검증 [V16·HIGH 격상]** — DV4는 `lstat().isSymbolicLink()` + `O_NOFOLLOW` 의존. **Windows reparse point(junction·마운트·OneDrive·AppExecLink)는 `isSymbolicLink()=false`로 미탐 + `O_NOFOLLOW` 효과 불일치 → lstat/O_NOFOLLOW 단독 우회 가능**(agy#5·설계서 AS4 "알려진 한계·강화"). **∴ realpath 조상 walk + `isWithinRoot(realBase, real)`(api/index.ts:95-96 패턴)를 lstat/O_NOFOLLOW와 별개의 "최후방어(last-line defense)"로 절대 유지** — lstat이 미탐해도 realpath 경계검사가 out-root 대상을 닫는다(D2/D6 앵커). **필수 CI 게이트(skip 불가):** 3-OS CI에 **Windows junction/symlink 공격 픽스처**(junction→out-root·reparse→out-root)를 넣어 docs 뷰어 거부가 실제로 닫히는지 못박는다. lstat 단독 비의존을 테스트로 증명.
-- [ ] **DV4 규율 동일성 확인 (완료·근거 확보):** "전 세그먼트 lstat 심링크 무조건 거부(in-root든 out-root든)"는 기존 artifact 서빙과 **동일 규율**임을 코드로 확인 — `api/index.ts:80-99`가 정확히 (a) base부터 leaf 부모까지 walk lstat 심링크 거부(:81-85), (b) leaf `O_NOFOLLOW` open(:88), (c) fstat 정규파일(:92), (d) realpath 이중 앵커 재확인(:95-96), (e) dev/ino 바인딩(:98-99)을 이미 수행. **docs 라우트는 base만 `join(projectRoot,"docs")`로 바꿔 이 패턴을 앵커 파라미터화 재사용**(신규 방어 발명 아님). realpath 경계검사만으로 중간 세그먼트 허용 금지(감사 R1-#2/I6/A54).
-- [ ] **DV8 sanitizer/CSP 착수 게이트 선행 — ⚠️ [V4·HIGH 승격] 웹 렌더 구현 前 필수 통과 게이트(미충족 시 렌더 경로 착수 금지):** 마크다운 렌더러·sanitizer가 현재 의존성에 **전무**(package.json `dependencies` = react/react-dom/fastify/zod + @types만, `grep markdown-it|dompurify|sanitize` = 0). DV8이 열린질문인 채로 웹을 착수하면 `dangerouslySetInnerHTML` 정책이 흔들려 XSS 방어가 무너진다(codex#4·agy#6). **∴ 아래 3건을 웹 구현 착수 前 필수 체크로 못박고, 전건 통과 전엔 "렌더" 경로 착수 금지:**
-  - [ ] **(게이트-1) 후보 A(클라 DOMPurify) vs B(서버 SSR sanitize-html) 택1 결정 확정** — §열린 질문 1. 미결 상태로 착수 불가. (로컬 단일사용자·읽기전용 → 결합 최소 후보 A 권장, 오케스트레이터 최종 판정.) 결정에 따라 신규 런타임 의존성 2종(`markdown-it`(`html:false`) + DOMPurify 또는 sanitize-html) 추가 — 공급망 감사 대상.
-  - [ ] **(게이트-2) 파일응답 CSP 범위 확정** — 현 `onSend`(security.ts:81-85)는 nosniff·no-referrer만·CSP **부재**. 파일응답에 `default-src 'none'; script-src 'none'; img-src 'self'` 등 신규. **범위 = 파일응답(직접 내비게이션) 헤더 CSP + SPA 내 렌더는 sanitizer 주방어**(§열린 질문 2)로 확정 후 착수(어디에 CSP를 붙이는지 모호한 채 착수 금지).
-  - [ ] **(게이트-3) sanitizer URL scheme 화이트리스트 테스트 선작성** — `javascript:`·`data:` scheme 거부 + `http`/`https`/`mailto` 통과를 검증하는 테스트(거부 스위트 케이스 15·16)를 **웹 렌더 구현 前 Red 상태로 선작성**. sanitizer 파이프라인이 이 테스트를 Green으로 만드는 방식으로만 구현.
+- [x] **AS4(Windows 심링크/junction) 선검증 [V16·HIGH 격상]** — DV4는 `lstat().isSymbolicLink()` + `O_NOFOLLOW` 의존. **Windows reparse point(junction·마운트·OneDrive·AppExecLink)는 `isSymbolicLink()=false`로 미탐 + `O_NOFOLLOW` 효과 불일치 → lstat/O_NOFOLLOW 단독 우회 가능**(agy#5·설계서 AS4 "알려진 한계·강화"). **∴ realpath 조상 walk + `isWithinRoot(realBase, real)`(api/index.ts:95-96 패턴)를 lstat/O_NOFOLLOW와 별개의 "최후방어(last-line defense)"로 절대 유지** — lstat이 미탐해도 realpath 경계검사가 out-root 대상을 닫는다(D2/D6 앵커). **필수 CI 게이트(skip 불가):** 3-OS CI에 **Windows junction/symlink 공격 픽스처**(junction→out-root·reparse→out-root)를 넣어 docs 뷰어 거부가 실제로 닫히는지 못박는다. lstat 단독 비의존을 테스트로 증명.
+- [x] **DV4 규율 동일성 확인 (완료·근거 확보):** "전 세그먼트 lstat 심링크 무조건 거부(in-root든 out-root든)"는 기존 artifact 서빙과 **동일 규율**임을 코드로 확인 — `api/index.ts:80-99`가 정확히 (a) base부터 leaf 부모까지 walk lstat 심링크 거부(:81-85), (b) leaf `O_NOFOLLOW` open(:88), (c) fstat 정규파일(:92), (d) realpath 이중 앵커 재확인(:95-96), (e) dev/ino 바인딩(:98-99)을 이미 수행. **docs 라우트는 base만 `join(projectRoot,"docs")`로 바꿔 이 패턴을 앵커 파라미터화 재사용**(신규 방어 발명 아님). realpath 경계검사만으로 중간 세그먼트 허용 금지(감사 R1-#2/I6/A54).
+- [x] **DV8 sanitizer/CSP 착수 게이트 선행 — ⚠️ [V4·HIGH 승격] 웹 렌더 구현 前 필수 통과 게이트(미충족 시 렌더 경로 착수 금지):** 마크다운 렌더러·sanitizer가 현재 의존성에 **전무**(package.json `dependencies` = react/react-dom/fastify/zod + @types만, `grep markdown-it|dompurify|sanitize` = 0). DV8이 열린질문인 채로 웹을 착수하면 `dangerouslySetInnerHTML` 정책이 흔들려 XSS 방어가 무너진다(codex#4·agy#6). **∴ 아래 3건을 웹 구현 착수 前 필수 체크로 못박고, 전건 통과 전엔 "렌더" 경로 착수 금지:**
+  - [x] **(게이트-1) 후보 A(클라 DOMPurify) vs B(서버 SSR sanitize-html) 택1 결정 확정** — §열린 질문 1. 미결 상태로 착수 불가. (로컬 단일사용자·읽기전용 → 결합 최소 후보 A 권장, 오케스트레이터 최종 판정.) 결정에 따라 신규 런타임 의존성 2종(`markdown-it`(`html:false`) + DOMPurify 또는 sanitize-html) 추가 — 공급망 감사 대상.
+  - [x] **(게이트-2) 파일응답 CSP 범위 확정** — 현 `onSend`(security.ts:81-85)는 nosniff·no-referrer만·CSP **부재**. 파일응답에 `default-src 'none'; script-src 'none'; img-src 'self'` 등 신규. **범위 = 파일응답(직접 내비게이션) 헤더 CSP + SPA 내 렌더는 sanitizer 주방어**(§열린 질문 2)로 확정 후 착수(어디에 CSP를 붙이는지 모호한 채 착수 금지).
+  - [x] **(게이트-3) sanitizer URL scheme 화이트리스트 테스트 선작성** — `javascript:`·`data:` scheme 거부 + `http`/`https`/`mailto` 통과를 검증하는 테스트(거부 스위트 케이스 15·16)를 **웹 렌더 구현 前 Red 상태로 선작성**. sanitizer 파이프라인이 이 테스트를 Green으로 만드는 방식으로만 구현.
   - **미결이면:** raw-escaped 경로(무의존)만 선구현 가능하나, 마크다운 **렌더** 경로는 위 3게이트 전건 통과 전 착수 금지.
-- [ ] **docs/ 재귀 범위 denylist 확정(DV5·감사 열린질문 §639-4):** `docs/` 전체 재귀 노출 시 우발적 민감파일 노출 검토 → DV5 확장자 규칙·DV7 바이너리·DV6 크기상한으로 방어. 하위 디렉토리 추가 제한 필요 여부 오케스트레이터 판정.
-- [ ] **[V12·LOW] `/events` 소비 shape 회귀 — F5 RunDetail 변경 前 선행 버그픽스(기존 버그):** 서버 `readEvents`(runs.ts:113-116)는 `{items, nextAfter, hasMore, runState}`를 반환하나 웹 `RunDetail`(screens.tsx:175)은 `{events: Array<...>}`로 소비 → `ev.data.events`가 항상 `undefined`라 **현재 런상세 이벤트 목록이 이미 깨진 채 방치**. B-3에서 RunDetail을 공유 뷰어로 승격하기 **전에** 이 shape 불일치를 먼저 잡는다. **서버 SSOT = `items`**(변경 없음·페이지네이션 계약 유지). 정정 방향 = 웹 소비를 `items`(+`nextAfter`/`hasMore`)로 교정(web-builder 파일권 `src/web/**` — server-builder는 계약 shape을 `{items,...}`로 확정·통지만). 회귀 테스트: `/events` 응답 shape assert(server) + RunDetail 이벤트 렌더 assert(web).
+- [x] **docs/ 재귀 범위 denylist 확정(DV5·감사 열린질문 §639-4):** `docs/` 전체 재귀 노출 시 우발적 민감파일 노출 검토 → DV5 확장자 규칙·DV7 바이너리·DV6 크기상한으로 방어. 하위 디렉토리 추가 제한 필요 여부 오케스트레이터 판정.
+- [x] **[V12·LOW] `/events` 소비 shape 회귀 — F5 RunDetail 변경 前 선행 버그픽스(기존 버그):** 서버 `readEvents`(runs.ts:113-116)는 `{items, nextAfter, hasMore, runState}`를 반환하나 웹 `RunDetail`(screens.tsx:175)은 `{events: Array<...>}`로 소비 → `ev.data.events`가 항상 `undefined`라 **현재 런상세 이벤트 목록이 이미 깨진 채 방치**. B-3에서 RunDetail을 공유 뷰어로 승격하기 **전에** 이 shape 불일치를 먼저 잡는다. **서버 SSOT = `items`**(변경 없음·페이지네이션 계약 유지). 정정 방향 = 웹 소비를 `items`(+`nextAfter`/`hasMore`)로 교정(web-builder 파일권 `src/web/**` — server-builder는 계약 shape을 `{items,...}`로 확정·통지만). 회귀 테스트: `/events` 응답 shape assert(server) + RunDetail 이벤트 렌더 assert(web).
 
 ## 작업 체크리스트
 
 ### A. 서버 — docs API + 뷰어 방어층 (server-builder, `src/server/**`)
 
 #### A-1. 공용 경화 리더 앵커 파라미터화 (통합감사 #3 재사용)
-- [ ] `api/index.ts:67-107` artifact 서빙의 walk-lstat / O_NOFOLLOW / fstat / realpath 이중앵커 / dev·ino 바인딩 로직을 **앵커(base) 파라미터화한 공용 함수**로 추출(예 `serveSafeFile(projectRoot, base, segs, {viewMax, artifactMax})`). 하드코딩 base 금지. 기존 artifact 라우트도 이 공용 함수 소비로 전환(동작 불변 — 외과적, dev-rules §3).
-- [ ] 추출은 동작 회귀 없음을 기존 `test/m4api.test.ts` artifact 스위트로 보증(리팩토링 안전망).
+- [x] `api/index.ts:67-107` artifact 서빙의 walk-lstat / O_NOFOLLOW / fstat / realpath 이중앵커 / dev·ino 바인딩 로직을 **앵커(base) 파라미터화한 공용 함수**로 추출(예 `serveSafeFile(projectRoot, base, segs, {viewMax, artifactMax})`). 하드코딩 base 금지. 기존 artifact 라우트도 이 공용 함수 소비로 전환(동작 불변 — 외과적, dev-rules §3).
+- [x] 추출은 동작 회귀 없음을 기존 `test/m4api.test.ts` artifact 스위트로 보증(리팩토링 안전망).
 
 #### A-2. DV1 열람 루트 화이트리스트 (신규)
-- [ ] `GET /api/docs` — `docs/` 트리(디렉토리·파일 목록). base = `join(projectRoot,"docs")`. `statestats.ts:11-21` `notSymlinkDir`/`listMd`(심링크 디렉토리 거부·MAX_DOCS cap) 재사용·확장(md 외 txt/json/log 포함 확장 판단). **`docs/`·`_workspace/runs/{runId}/artifacts/` 두 루트 외 요청 = 400.** projectRoot 밖 원천 불가.
-- [ ] `GET /api/docs/*` — docs 하위 파일 열람. A-1 공용 함수를 base=docs로 호출.
-- [ ] run artifacts(`/api/runs/:runId/artifacts`·`/*`)는 기존 유지(A27/A28/A45) — 뷰어가 이 엔드포인트 소비.
+- [x] `GET /api/docs` — `docs/` 트리(디렉토리·파일 목록). base = `join(projectRoot,"docs")`. `statestats.ts:11-21` `notSymlinkDir`/`listMd`(심링크 디렉토리 거부·MAX_DOCS cap) 재사용·확장(md 외 txt/json/log 포함 확장 판단). **`docs/`·`_workspace/runs/{runId}/artifacts/` 두 루트 외 요청 = 400.** projectRoot 밖 원천 불가.
+- [x] `GET /api/docs/*` — docs 하위 파일 열람. A-1 공용 함수를 base=docs로 호출.
+- [x] run artifacts(`/api/runs/:runId/artifacts`·`/*`)는 기존 유지(A27/A28/A45) — 뷰어가 이 엔드포인트 소비.
 
 #### A-3. DV2·DV3·DV4 경로안전 (재사용)
-- [ ] DV2 per-세그먼트 `isSafeSegment`(paths.ts:18) — 빈/`.`/`..`/메타 거부. `rel.split("/")` 전 세그먼트 검사(api/index.ts:70-71 패턴).
-- [ ] DV3 realpath 앵커 선계산 — walk 이전 `realpath(base)` + `isWithinRoot(realRoot, realBase)`(api/index.ts:77-79).
-- [ ] DV4 전 세그먼트 lstat 심링크 무조건 거부 + leaf O_NOFOLLOW + fstat 정규파일 + realpath 재확인 + dev/ino 바인딩(api/index.ts:81-99). **realpath 경계검사로 대체 금지.**
+- [x] DV2 per-세그먼트 `isSafeSegment`(paths.ts:18) — 빈/`.`/`..`/메타 거부. `rel.split("/")` 전 세그먼트 검사(api/index.ts:70-71 패턴).
+- [x] DV3 realpath 앵커 선계산 — walk 이전 `realpath(base)` + `isWithinRoot(realRoot, realBase)`(api/index.ts:77-79).
+- [x] DV4 전 세그먼트 lstat 심링크 무조건 거부 + leaf O_NOFOLLOW + fstat 정규파일 + realpath 재확인 + dev/ino 바인딩(api/index.ts:81-99). **realpath 경계검사로 대체 금지.**
 
 #### A-4. DV5 denylist 확장 (security.ts 확장 + docs용 denylist 분리)
-- [ ] `deniedPath`(security.ts:90-94) 재사용. dot-prefix 세그먼트(`.env`·`.git`·`.ssh`·`.aws`)와 node_modules는 기존 `DENY`(security.ts:89)가 이미 커버 — **재확인만**.
-- [ ] **신규 추가(확장자·비-dot 파일명 기반):** `*.key`·`*.pem`·`*.p12`·`*.pfx`·`id_rsa*`. 기존 정규식은 dot-prefix만 잡으므로 `foo.key`·`id_rsa`(비-dot)는 미커버 → deniedPath에 확장자/파일명 규칙 추가.
-- [ ] **[V5·MED 본작업] `registry` 부분일치 오거부 정정 — docs용 denylist 분리·세그먼트 앵커화:** 현 `deniedPath`(security.ts:92)는 `/registry/i`를 **부분일치(anchor 없음)**로 거부 → artifact엔 무해하나 **docs 뷰어에 그대로 재사용하면 `docs/registry-*.md`·본문에 "registry"/"session" 포함된 정상 문서를 오거부**(codex#5). `session\.key`도 산문에서 오탐 가능. **∴ docs 라우트는 (a) 별도 docs 전용 denylist를 두거나 (b) `registry` 패턴을 세그먼트 앵커(`(^|\/)registry(\/|$)`)로 좁혀 파일명/세그먼트 단위로만 매칭**. **ACCEPT 계약(오거부 금지):** 파일명·본문에 "registry"/"session"이 포함된 정상 docs 문서(`registry-notes.md` 등)는 200으로 통과해야 함. 이 ACCEPT 케이스를 A55/A57 매핑(아래 통과표·거부표)에 회귀로 못박는다.
-- [ ] denylist는 **해석 전(rel 문자열)** 적용(DV5).
+- [x] `deniedPath`(security.ts:90-94) 재사용. dot-prefix 세그먼트(`.env`·`.git`·`.ssh`·`.aws`)와 node_modules는 기존 `DENY`(security.ts:89)가 이미 커버 — **재확인만**.
+- [x] **신규 추가(확장자·비-dot 파일명 기반):** `*.key`·`*.pem`·`*.p12`·`*.pfx`·`id_rsa*`. 기존 정규식은 dot-prefix만 잡으므로 `foo.key`·`id_rsa`(비-dot)는 미커버 → deniedPath에 확장자/파일명 규칙 추가.
+- [x] **[V5·MED 본작업] `registry` 부분일치 오거부 정정 — docs용 denylist 분리·세그먼트 앵커화:** 현 `deniedPath`(security.ts:92)는 `/registry/i`를 **부분일치(anchor 없음)**로 거부 → artifact엔 무해하나 **docs 뷰어에 그대로 재사용하면 `docs/registry-*.md`·본문에 "registry"/"session" 포함된 정상 문서를 오거부**(codex#5). `session\.key`도 산문에서 오탐 가능. **∴ docs 라우트는 (a) 별도 docs 전용 denylist를 두거나 (b) `registry` 패턴을 세그먼트 앵커(`(^|\/)registry(\/|$)`)로 좁혀 파일명/세그먼트 단위로만 매칭**. **ACCEPT 계약(오거부 금지):** 파일명·본문에 "registry"/"session"이 포함된 정상 docs 문서(`registry-notes.md` 등)는 200으로 통과해야 함. 이 ACCEPT 케이스를 A55/A57 매핑(아래 통과표·거부표)에 회귀로 못박는다.
+- [x] denylist는 **해석 전(rel 문자열)** 적용(DV5).
 
 #### A-5. DV6 크기상한 (fstat 스트림 前 — 재사용+확장)
-- [ ] 다운로드: `fstat.size > ARTIFACT_MAX`(8MB) → **스트림 시작 前 `413` 즉시 반환**(api/index.ts:91-93 이미 구현). **중간 스트림 중단 금지**(A98·R2-#5 — 부분파일 손상 방지). 413 body에 크기·상한 명시.
-- [ ] 미리보기: **`VIEW_MAX`(예 1MB) 신규 도입** — 초과 시 미리보기 거부·절단 표시(현재 statestats `MAX_DOC_BYTES`=256KB는 내부 스캔용, 뷰어 VIEW_MAX와 별개). 응답에 `truncated`·`fullSize` 메타 포함(UI 배너용).
+- [x] 다운로드: `fstat.size > ARTIFACT_MAX`(8MB) → **스트림 시작 前 `413` 즉시 반환**(api/index.ts:91-93 이미 구현). **중간 스트림 중단 금지**(A98·R2-#5 — 부분파일 손상 방지). 413 body에 크기·상한 명시.
+- [x] 미리보기: **`VIEW_MAX`(예 1MB) 신규 도입** — 초과 시 미리보기 거부·절단 표시(현재 statestats `MAX_DOC_BYTES`=256KB는 내부 스캔용, 뷰어 VIEW_MAX와 별개). 응답에 `truncated`·`fullSize` 메타 포함(UI 배너용).
 
 #### A-6. DV7 바이너리 거부 (신규)
-- [ ] readCapped(statestats.ts:23-36) 확장 또는 신규 — **널바이트/비-UTF8 감지** → 미리보기 거부, attachment 다운로드만 허용(하드상한 적용). 응답에 `binary: true` 메타.
+- [x] readCapped(statestats.ts:23-36) 확장 또는 신규 — **널바이트/비-UTF8 감지** → 미리보기 거부, attachment 다운로드만 허용(하드상한 적용). 응답에 `binary: true` 메타.
 
 #### A-7. DV8 렌더 안전 헤더 + MIME 화이트리스트 (치명·신규)
-- [ ] **CSP 헤더** — docs/artifact 파일 응답에 `default-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'` 추가. 현재 onSend(security.ts:81-85)는 nosniff·no-referrer만 → CSP 신규. **적용 지점 결정(§열린 질문): API 파일응답 헤더 vs SPA 문서 CSP** — 직접 내비게이션 방어는 파일응답 헤더, SPA 내 렌더 방어는 sanitizer.
-- [ ] **MIME 화이트리스트로 렌더 결정** — md/txt/json/log = sanitized 미리보기 허용, 그 외(SVG/HTML/JS 포함) = `Content-Disposition: attachment` 다운로드만·비렌더(A14 준용). nosniff 유지(security.ts:82).
-- [ ] 서버가 raw 텍스트를 반환하되 클라 sanitizer가 렌더(설계 §F5.3 — SSR 또는 클라 신뢰 컴포넌트 동일 정책). 반환 형태(JSON `{content,mime,truncated,binary}` vs raw+헤더) 결정.
+- [x] **CSP 헤더** — docs/artifact 파일 응답에 `default-src 'none'; img-src 'self'; style-src 'self'; script-src 'none'; frame-ancestors 'none'` 추가. 현재 onSend(security.ts:81-85)는 nosniff·no-referrer만 → CSP 신규. **적용 지점 결정(§열린 질문): API 파일응답 헤더 vs SPA 문서 CSP** — 직접 내비게이션 방어는 파일응답 헤더, SPA 내 렌더 방어는 sanitizer.
+- [x] **MIME 화이트리스트로 렌더 결정** — md/txt/json/log = sanitized 미리보기 허용, 그 외(SVG/HTML/JS 포함) = `Content-Disposition: attachment` 다운로드만·비렌더(A14 준용). nosniff 유지(security.ts:82).
+- [x] 서버가 raw 텍스트를 반환하되 클라 sanitizer가 렌더(설계 §F5.3 — SSR 또는 클라 신뢰 컴포넌트 동일 정책). 반환 형태(JSON `{content,mime,truncated,binary}` vs raw+헤더) 결정.
 
 #### A-8. DV9 fail-closed
-- [ ] DV1~DV8 중 하나라도 실패 = 400/403/413, 열람 안 함. 모든 거부 경로가 fail-closed로 닫히는지 코드 추적(security-auditor 대상).
+- [x] DV1~DV8 중 하나라도 실패 = 400/403/413, 열람 안 함. 모든 거부 경로가 fail-closed로 닫히는지 코드 추적(security-auditor 대상).
 
 ### B. 웹 — 뷰어 컴포넌트 + UX (web-builder, `src/web/**`)
 
 #### B-1. 신규 의존성 (DV8)
-- [ ] 마크다운 렌더러 + sanitizer 추가(§신규 의존성 후보 참조). `package.json` dependencies에 추가. **`html:false` 파싱 + sanitizer allowlist + URL scheme 화이트리스트(http/https/mailto) + 외부리소스 차단** 파이프라인 구성.
-- [ ] `dangerouslySetInnerHTML` 도입 시(sanitize된 HTML 렌더용) — screens.tsx:2 "innerHTML 미사용" 주석 정정 + **sanitizer 통과분만** 주입·CSP 백스톱. 미도입(escaped-only) 경로도 병행 가능.
+- [x] 마크다운 렌더러 + sanitizer 추가(§신규 의존성 후보 참조). `package.json` dependencies에 추가. **`html:false` 파싱 + sanitizer allowlist + URL scheme 화이트리스트(http/https/mailto) + 외부리소스 차단** 파이프라인 구성.
+- [x] `dangerouslySetInnerHTML` 도입 시(sanitize된 HTML 렌더용) — screens.tsx:2 "innerHTML 미사용" 주석 정정 + **sanitizer 통과분만** 주입·CSP 백스톱. 미도입(escaped-only) 경로도 병행 가능.
 
 #### B-2. 공유 뷰어 컴포넌트 (A59·A89)
-- [ ] **파일 트리 + 브레드크럼**(A89) — `GET /api/docs` 트리 소비. 읽기전용.
-- [ ] escaped text 기본 렌더 + **마크다운 렌더 ↔ raw 토글**(A89·DV8 — raw도 React escape·비실행).
-- [ ] 다운로드 버튼(artifact fetch → blob, api.ts:53-57 fetchArtifact 패턴 확장).
-- [ ] 빈/로딩/에러 3-state(A46·A81 횡단).
+- [x] **파일 트리 + 브레드크럼**(A89) — `GET /api/docs` 트리 소비. 읽기전용.
+- [x] escaped text 기본 렌더 + **마크다운 렌더 ↔ raw 토글**(A89·DV8 — raw도 React escape·비실행).
+- [x] 다운로드 버튼(artifact fetch → blob, api.ts:53-57 fetchArtifact 패턴 확장).
+- [x] 빈/로딩/에러 3-state(A46·A81 횡단).
 
 #### B-3. 진입점 배선 (A59·F5.4)
-- [ ] **Runs 상세**(screens.tsx:173-199 RunDetail) — 기존 `art` `<pre>` 렌더(:194)를 공유 뷰어 컴포넌트로 승격(A45 확장). fetchArtifact → 뷰어.
-- [ ] **Overview** — D4 규율/진화 이력 카드(A36/A38·screens.tsx:52)에서 결과서(`docs/*/working_history`) 클릭 → 뷰어 진입.
+- [x] **Runs 상세**(screens.tsx:173-199 RunDetail) — 기존 `art` `<pre>` 렌더(:194)를 공유 뷰어 컴포넌트로 승격(A45 확장). fetchArtifact → 뷰어.
+- [x] **Overview** — D4 규율/진화 이력 카드(A36/A38·screens.tsx:52)에서 결과서(`docs/*/working_history`) 클릭 → 뷰어 진입.
 
 #### B-4. UX 상태 (A89·A98)
-- [ ] 미리보기 크기초과 → "미리보기 잘림(N까지)·전체 다운로드" 배너(VIEW_MAX·truncated 메타).
-- [ ] **다운로드 413 포착 → "파일이 너무 큼 · 로컬에서 열기" + 로컬 절대경로 표시**(A98 — OS 직접 열기 안내). api.ts에 413 상태 처리 추가(현재 apiGet은 401만 특수처리·:33).
-- [ ] 바이너리(binary 메타) → "미리보기 불가(바이너리)·다운로드".
+- [x] 미리보기 크기초과 → "미리보기 잘림(N까지)·전체 다운로드" 배너(VIEW_MAX·truncated 메타).
+- [x] **다운로드 413 포착 → "파일이 너무 큼 · 로컬에서 열기" + 로컬 절대경로 표시**(A98 — OS 직접 열기 안내). api.ts에 413 상태 처리 추가(현재 apiGet은 401만 특수처리·:33).
+- [x] 바이너리(binary 메타) → "미리보기 불가(바이너리)·다운로드".
 
 #### B-5. 공통 UI 회귀 (A83·A92 — [V6·MED])
-- [ ] **A83 패널별 독립 로딩·부분실패 격리:** 뷰어 화면의 파일 트리·미리보기·다운로드 상태가 **각각 독립 로딩/에러**로 처리되고, 한 패널(예 미리보기 413/바이너리)의 실패가 다른 패널(트리·브레드크럼)을 무너뜨리지 않는다. 3-state(A46·A81)를 패널 단위로.
-- [ ] **A92 접근성(WCAG AA):** 트리·브레드크럼·렌더↔raw 토글·다운로드 버튼이 **키보드 조작 가능**·포커스 링 가시·색 대비 AA·상태(잘림/바이너리/에러)를 **색상 단독 의존 없이** 텍스트/아이콘 병기.
+- [x] **A83 패널별 독립 로딩·부분실패 격리:** 뷰어 화면의 파일 트리·미리보기·다운로드 상태가 **각각 독립 로딩/에러**로 처리되고, 한 패널(예 미리보기 413/바이너리)의 실패가 다른 패널(트리·브레드크럼)을 무너뜨리지 않는다. 3-state(A46·A81)를 패널 단위로.
+- [x] **A92 접근성(WCAG AA):** 트리·브레드크럼·렌더↔raw 토글·다운로드 버튼이 **키보드 조작 가능**·포커스 링 가시·색 대비 AA·상태(잘림/바이너리/에러)를 **색상 단독 의존 없이** 텍스트/아이콘 병기.
 
 ## 수용기준 → 테스트 매핑
 

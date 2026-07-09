@@ -1,6 +1,5 @@
 // API 라우트 등록. 보안 미들웨어(token/Host/Origin/denylist)는 security.ts.
-import { constants } from "node:fs";
-import { open, readdir, realpath, lstat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { detectRuntimes } from "../adapters/runtime.js";
@@ -8,14 +7,14 @@ import { harnessInventory, readAgents, readSkills } from "../adapters/harness.js
 import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapters/runs.js";
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
+import { docsTree } from "../adapters/docs.js";
 import { RunsQuery } from "../schemas.js";
-import { isSafeSegment, isWithinRoot } from "../lib/paths.js";
-import { deniedPath } from "../security.js";
+import { isSafeSegment, isSafeDocsSegment } from "../lib/paths.js";
+import { openSafeFile, sendDownload, sendPreview, DOWNLOAD_MAX, VIEW_MAX } from "../lib/servefile.js";
+import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
 import { cancelRun } from "../supervisor/reconcile.js";
 import { join as pjoin } from "node:path";
-
-const ARTIFACT_MAX = 8 * 1024 * 1024; // 8MB 상한
 
 export function registerApi(app: FastifyInstance, projectRoot: string): void {
   app.get("/api/runtimes", async () => detectRuntimes());
@@ -63,7 +62,8 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   app.get<{ Params: { runId: string } }>("/api/runs/:runId/agents", async (req) =>
     readRunAgents(projectRoot, req.params.runId));
 
-  // artifact list + serve(untrusted): SAFE_SEGMENT·denylist·심링크 거부·O_NOFOLLOW·nosniff·attachment·크기 상한.
+  // artifact list + serve(untrusted): 공용 경화 리더(openSafeFile) 소비 — SAFE_SEGMENT·denylist·심링크 거부·
+  // O_NOFOLLOW·dev/ino 바인딩·CSP·nosniff·attachment·크기 상한. base 앵커 = runId/artifacts.
   app.get<{ Params: { runId: string } }>("/api/runs/:runId/artifacts", async (req, reply) => {
     if (!isSafeSegment(req.params.runId)) return reply.code(400).send({ error: "invalid-runId" });
     const dir = join(projectRoot, "_workspace", "runs", req.params.runId, "artifacts");
@@ -74,44 +74,31 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   });
   app.get<{ Params: { runId: string; "*": string } }>("/api/runs/:runId/artifacts/*", async (req, reply) => {
     if (!isSafeSegment(req.params.runId)) return reply.code(400).send({ error: "invalid-runId" });
-    const rel = req.params["*"] ?? "";
-    const segs = rel.split("/");
-    if (segs.length === 0 || !segs.every(isSafeSegment) || deniedPath(rel)) return reply.code(400).send({ error: "invalid-path" });
     const runsRoot = join(projectRoot, "_workspace", "runs");
     const base = join(runsRoot, req.params.runId, "artifacts");
-    const target = join(base, ...segs);
-    if (!isWithinRoot(base, target)) return reply.code(400).send({ error: "out-of-bounds" });
-    // 앵커를 **walk 이전에 선계산**(base swap 창 축소, agy R4). realBase 가 project 내여야.
-    const realRoot = await realpath(projectRoot);
-    const realBase = await realpath(base).catch(() => null);
-    if (!realBase || !isWithinRoot(realRoot, realBase)) return reply.code(400).send({ error: "bad-base" });
-    // **base 컴포넌트(runId·artifacts)부터** leaf 부모까지 전 경로 symlink 구조적 거부(base-symlink→in-project 노출 차단).
-    const walk = [join(runsRoot, req.params.runId), base, ...segs.slice(0, -1).map((_, i) => join(base, ...segs.slice(0, i + 1)))];
-    for (const seg of walk) {
-      const l = await lstat(seg).catch(() => null);
-      if (!l || l.isSymbolicLink()) return reply.code(400).send({ error: "symlink-in-path" });
-    }
-    // leaf O_NOFOLLOW 로 먼저 open(check-reopen TOCTOU 제거). 그 뒤 fstat(크기·정규) + realpath 이중 앵커.
-    let fh;
-    try { fh = await open(target, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)); }
-    catch { return reply.code(404).send({ error: "not-found" }); }
+    const segs = (req.params["*"] ?? "").split("/");
+    const r = await openSafeFile(projectRoot, base, segs, {
+      denyPath: deniedPath, ancestors: [join(runsRoot, req.params.runId)],
+    });
+    if (!r.ok) return reply.code(r.code).send({ error: r.error });
+    try { return await sendDownload(reply, r, DOWNLOAD_MAX); }
+    finally { await r.fh.close().catch(() => {}); }
+  });
+
+  // F5 docs 뷰어(DV1~DV9): 트리(화이트루트 docs/ 재귀) + 파일 열람. 읽기전용(I8).
+  // 미리보기(기본) = JSON {content,mime,renderable,binary,truncated,size}(원문 텍스트·sanitize는 클라).
+  // ?download=1 = attachment 원본(다운로드 前 413·중간중단 금지). 두 응답 모두 엄격 CSP + nosniff.
+  app.get("/api/docs", async () => docsTree(projectRoot));
+  app.get<{ Params: { "*": string }; Querystring: { download?: string } }>("/api/docs/*", async (req, reply) => {
+    const rel = req.params["*"] ?? "";
+    const segs = rel.split("/");
+    const base = join(projectRoot, "docs");
+    const r = await openSafeFile(projectRoot, base, segs, { denyPath: deniedDocsPath, isSafeSeg: isSafeDocsSegment });
+    if (!r.ok) return reply.code(r.code).send({ error: r.error });
     try {
-      const st = await fh.stat();
-      if (!st.isFile()) return reply.code(404).send({ error: "not-file" });
-      if (st.size > ARTIFACT_MAX) return reply.code(413).send({ error: "too-large" });
-      // target 이 (선계산된) realBase 내인지 — 내부 symlink→타경로 차단.
-      const real = await realpath(target);
-      if (!isWithinRoot(realBase, real)) return reply.code(400).send({ error: "escape" });
-      // dev/ino 바인딩: open 한 fd 와 현재 경로가 같은 inode 인지(open↔check 사이 부모 swap 탐지).
-      const l = await lstat(target).catch(() => null);
-      if (!l || l.ino !== st.ino || l.dev !== st.dev) return reply.code(409).send({ error: "path-changed" });
-      const buf = Buffer.alloc(Math.min(st.size, ARTIFACT_MAX)); // 크기 상한 내로만 read(open 후 성장 방어)
-      await fh.read(buf, 0, buf.length, 0);
-      reply.header("Content-Type", "text/plain; charset=utf-8");
-      reply.header("Content-Disposition", `attachment; filename="${segs[segs.length - 1]!.replace(/[^A-Za-z0-9._-]/g, "_")}"`);
-      reply.header("X-Content-Type-Options", "nosniff");
-      return reply.send(buf);
-    } finally { await fh.close().catch(() => {}); }
+      if (req.query.download !== undefined) return await sendDownload(reply, r, DOWNLOAD_MAX);
+      return await sendPreview(reply, r, rel, VIEW_MAX);
+    } finally { await r.fh.close().catch(() => {}); }
   });
 
   // drift
