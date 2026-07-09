@@ -9,14 +9,27 @@ import { Manifest, Status, AgentState, Event, isSchemaValid, type RunsQuery } fr
 import type { z } from "zod";
 import { isSafeSegment, isWithinRoot } from "../lib/paths.js";
 
-function runsDir(root: string): string { return join(root, "_workspace", "runs"); }
+// M9 S1: anchor 파라미터화(통합감사-#3·하드코딩 2벌 금지). 기본 `_workspace/runs`(F4/F6),
+//   M13(F8)은 `<state_home>/evals-rollup` 등 다른 anchor 로 동일 공용 리더 재사용. sub 미지정 =
+//   기존 M7 호출부 계약 불변(default 로 동일 경로 → F4 거부 스위트 회귀 0).
+const DEFAULT_RUNS_SUB = ["_workspace", "runs"] as const;
+function runsDir(root: string, sub: readonly string[] = DEFAULT_RUNS_SUB): string { return join(root, ...sub); }
 const MAX_LINE = 256 * 1024; // 라인 상한(과대 라인 skip)
+// M9 R2 HIGH(agy·DoS): 과대 무개행 라인 drain 시 데드라인 없이도 강제 종료하는 누적바이트 상한.
+//   drain 구간엔 yield 가 없어 호출자 데드라인/라인캡 검사가 못 돈다(§readCappedLines). deadlineAt
+//   미주입 호출자를 위한 하드 백스톱 — 이 바이트를 넘도록 개행이 안 나오면 강제 abort(무한 블로킹 차단).
+export const MAX_DRAIN_BYTES = 64 * 1024 * 1024; // 64MB(단일 과대 라인 drain 상한)
 
 // M7 F4 스캔 바운드(상수 확정 — AS3). 읽기전용·OOM/ReDoS/데드라인 방어.
 export const MAX_RUNS_SCAN = 1000;      // 내용 read 상한(콜드캐시/Windows 현실값·V13)
 export const SCAN_DEADLINE_MS = 2000;   // 스캔 데드라인(초과 시 부분결과)
 export const MAX_JSON_BYTES = 64 * 1024; // status/manifest 개별 크기 상한(OOM 방어)
 export const MAX_RUN_DIRS = 100000;     // 이름+stat 열거 backstop
+export const MAX_EVENTS_PER_RUN = 50000; // M9: 집계 시 run 당 유효 event 스캔 상한(CPU/시간 바운드)
+// R1 HIGH(agy·DoS): 처리 라인(파손 포함) 상한. 유효 event 만 세는 maxEvents 는 비-JSON/스키마부적합 라인이
+//   폭주하면(count 미증가) for-await 가 파일 끝까지 무한 순회 → 수십초 블로킹. 처리 "라인" 자체를 바운드해
+//   maxEvents 미증가 무한루프를 차단. 유효 event 여유(4×)를 둬 정상 run 오탐 절단 방지.
+export const MAX_EVENT_LINES_PER_RUN = 200000;
 
 // agy#2: root/base realpath 앵커. 스캔 루프 바깥에서 1회 resolve 후 safeRunDir 에 주입 —
 //   호출마다 realpath(root)+realpath(base) 재조회(풀스캔 최대 2*N I/O) 제거. leaf 검증은 per-run 유지.
@@ -33,12 +46,12 @@ type AnchorResolution =
   | { kind: "enumerate" }
   | { kind: "blocked" };
 
-async function resolveRunAnchors(root: string): Promise<AnchorResolution> {
+async function resolveRunAnchors(root: string, sub: readonly string[] = DEFAULT_RUNS_SUB): Promise<AnchorResolution> {
   let realRoot: string;
   try { realRoot = await realpath(root); }
   catch { return { kind: "blocked" }; }                     // root 자체 resolve 실패 = 안전 차단
   let realBase: string;
-  try { realBase = await realpath(runsDir(root)); }
+  try { realBase = await realpath(runsDir(root, sub)); }
   catch (err) {
     if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return { kind: "enumerate" }; // base 부재=정당
     return { kind: "blocked" };                             // EACCES/IO 등 = 외부 열거 차단
@@ -50,9 +63,9 @@ async function resolveRunAnchors(root: string): Promise<AnchorResolution> {
 // runId → 안전한 run 디렉토리 절대경로. base·leaf symlink/traversal/경계이탈이면 null.
 // anchors 주입 시 root/base realpath·containment 는 선계산분 재사용(하위호환: 미주입 시 내부 계산).
 // 보안 계약 불변: leaf lstat 심링크 거부·O_NOFOLLOW·leaf realpath containment 재확인은 그대로.
-async function safeRunDir(root: string, runId: string, anchors?: RunAnchors | null): Promise<string | null> {
+async function safeRunDir(root: string, runId: string, anchors?: RunAnchors | null, sub: readonly string[] = DEFAULT_RUNS_SUB): Promise<string | null> {
   if (!isSafeSegment(runId)) return null;
-  const base = runsDir(root);
+  const base = runsDir(root, sub);
   const dir = join(base, runId);
   try {
     let realBase: string;
@@ -86,7 +99,7 @@ async function safeOpen(dir: string, name: string): Promise<FileHandle | null> {
 }
 // M7 V2: 크기상한(MAX_JSON_BYTES) 바운드 리더. readJsonSafe(전체 readFile·상한 없음) 재사용 금지.
 // safeOpen→fstat.size>상한이면 read 자체를 호출하지 않고 skip(oversize). 초과 아닐 때만 size 바운드 제한읽기 후 parse.
-async function readJsonCapped(dir: string, name: string): Promise<{ ok: boolean; value: unknown; oversize: boolean }> {
+export async function readJsonCapped(dir: string, name: string): Promise<{ ok: boolean; value: unknown; oversize: boolean }> {
   const h = await safeOpen(dir, name);
   if (!h) return { ok: false, value: null, oversize: false };
   try {
@@ -193,11 +206,23 @@ async function currentRunState(dir: string): Promise<string | null> {
 //   다음 개행까지 drain(무시)해 과대 라인이 힙을 넘지 못하게 한다(정상 라인은 그대로 yield).
 //   StringDecoder 로 멀티바이트 UTF-8 이 청크 경계에 걸쳐도 손실 없이 재조립. FileHandle close 는 호출측 finally.
 const READ_CHUNK = 64 * 1024;
-async function* readCappedLines(h: FileHandle): AsyncGenerator<string> {
+// M9 R2 HIGH(agy·DoS): 과대 라인 drain 조기종료 신호. drain 구간은 yield 가 없어 호출자 루프의
+//   데드라인/라인캡 검사가 실행되지 못하므로, 리더 내부에서 초과를 감지하면 이 sentinel 로 throw 해
+//   호출자가 truncated/reason 을 정직하게 반영(또는 안전 fallback)하게 한다.
+class LineReaderAbort extends Error {
+  constructor(public readonly abortReason: "deadline_exceeded" | "limit_reached") {
+    super(`readCappedLines aborted: ${abortReason}`);
+    this.name = "LineReaderAbort";
+  }
+}
+// deadlineAt(옵션): drain(과대 무개행 라인) 구간에서 매 청크 후 Date.now()>deadlineAt 검사 →
+//   초과 시 LineReaderAbort("deadline_exceeded") throw. MAX_DRAIN_BYTES 초과 시 강제 종료(무한 블로킹 차단).
+async function* readCappedLines(h: FileHandle, deadlineAt?: number): AsyncGenerator<string> {
   const buf = Buffer.allocUnsafe(READ_CHUNK);
   const decoder = new StringDecoder("utf8");
   let pending = "";        // 현재 라인 누적(개행 전). 항상 ≤ MAX_LINE + READ_CHUNK 로 바운드.
   let dropping = false;    // 과대 라인 drain 모드: 다음 개행까지 무시(힙 초과 방지).
+  let dropBytes = 0;       // drain 모드 누적 바이트(개행 없는 과대 라인 강제 종료 백스톱).
   let position = 0;
   for (;;) {
     const { bytesRead } = await h.read(buf, 0, READ_CHUNK, position);
@@ -208,13 +233,21 @@ async function* readCappedLines(h: FileHandle): AsyncGenerator<string> {
     while ((nl = chunk.indexOf("\n")) !== -1) {
       const segment = chunk.slice(0, nl);
       chunk = chunk.slice(nl + 1);
-      if (dropping) { dropping = false; pending = ""; continue; } // 과대 라인 종료 → 정상 모드 복귀
+      if (dropping) { dropping = false; dropBytes = 0; pending = ""; continue; } // 과대 라인 종료 → 정상 복귀
       yield pending + segment;
       pending = "";
     }
-    if (dropping) continue;                 // 개행 없는 나머지 = 계속 drain
+    if (dropping) {
+      // R2 HIGH: drain 구간엔 yield 가 없어 호출자 데드라인/라인캡 검사가 못 돈다. 수백MB 무개행
+      //   단일 블록이 여기서 통제 불능 블로킹(수십초 DoS)하지 못하도록 매 청크 후 데드라인·누적바이트
+      //   상한을 직접 검사해 초과 시 즉시 abort(호출자에 truncated/reason 신호).
+      dropBytes += bytesRead;
+      if (deadlineAt !== undefined && Date.now() > deadlineAt) throw new LineReaderAbort("deadline_exceeded");
+      if (dropBytes > MAX_DRAIN_BYTES) throw new LineReaderAbort("limit_reached");
+      continue;                             // 개행 없는 나머지 = 계속 drain(바운드 하에)
+    }
     pending += chunk;
-    if (pending.length > MAX_LINE) { pending = ""; dropping = true; } // 과대 라인 → 버퍼 비우고 drain
+    if (pending.length > MAX_LINE) { pending = ""; dropping = true; dropBytes = 0; } // 과대 라인 → drain
   }
   const tail = decoder.end();               // 미완 멀티바이트 flush
   if (!dropping) {
@@ -233,10 +266,13 @@ export async function readEvents(root: string, runId: string, afterIn: number, l
   const runState = await currentRunState(dir);
   const h = await safeOpen(dir, "events.jsonl"); // O_NOFOLLOW open — leaf symlink·재open 갭 제거
   if (!h) return { ...empty, runState };
+  // R2 HIGH: 자체 요청 처리 데드라인 — readCappedLines drain 구간이 이 시각을 넘기면 조기 abort.
+  //   요청당 상한(SCAN_DEADLINE_MS)으로 과대 무개행 라인 drain 이 무한 블로킹하지 못하게 한다.
+  const deadlineAt = Date.now() + SCAN_DEADLINE_MS;
   const items: Event[] = [];
   let hasMore = false;
   try {
-    for await (const line of readCappedLines(h)) { // agy#2: 고정 청크 리더(readLines 무한 누적 OOM 제거)
+    for await (const line of readCappedLines(h, deadlineAt)) { // agy#2/R2: 고정 청크 리더 + drain 데드라인
       if (!line || line.length > MAX_LINE) continue; // 빈/과대 라인 skip(seq 갭 가능 — 문서화)
       let obj: unknown;
       try { obj = JSON.parse(line); } catch { continue; }   // 파손 라인 skip
@@ -556,6 +592,121 @@ export async function queryRuns(root: string, query: RunsQuery): Promise<QueryRu
     recordedAtSource,
     schemaVersion: "1",
   };
+}
+
+// --- M9 F6: 공용 바운드 run 열거(anchor 파라미터) + 이벤트 스트리머 ----------------
+// queryRuns/listRuns 본문은 손대지 않는다(F4 거부 스위트 회귀 0). 보안 프리미티브
+// (resolveRunAnchors·safeRunDir·safeOpen·readCappedLines)만 재사용 — 앵커/심링크 2벌 금지.
+export interface RunRef { runId: string; dir: string; recordedAtMs: number; isMtime: boolean; }
+export interface BoundedRunEnum {
+  items: RunRef[];             // 상위 N(FS-time desc)만·safeRunDir 통과분
+  scanned: number;             // safeRunDir 시도 수
+  truncated: boolean;
+  truncatedReason: "limit_reached" | "deadline_exceeded" | "scan_error" | null;
+  recordedAtSource: "birthtime" | "mtime";
+}
+
+// anchor=sub(기본 `_workspace/runs`). 이름 열거→FS-time desc 정렬→상위 MAX_RUNS_SCAN 만 safeRunDir 해석.
+//   데드라인/캡/scan_error 를 truncatedReason 으로 정직 노출(0 위장 금지·V13 2원인 분리).
+export async function enumerateRunsBounded(root: string, sub: readonly string[] = DEFAULT_RUNS_SUB): Promise<BoundedRunEnum> {
+  const start = Date.now();
+  let deadlineHit = false, limitReached = false, scanError = false;
+  const base = runsDir(root, sub);
+  const empty = (reason: BoundedRunEnum["truncatedReason"]): BoundedRunEnum =>
+    ({ items: [], scanned: 0, truncated: reason !== null, truncatedReason: reason, recordedAtSource: "birthtime" });
+
+  const anchorRes = await resolveRunAnchors(root, sub);
+  if (anchorRes.kind === "blocked") return empty("scan_error"); // 외부 재앵커/접근오류 fail-closed
+  const anchors: RunAnchors | null = anchorRes.kind === "ok" ? anchorRes.anchors : null;
+
+  const names: string[] = [];
+  let dh: Awaited<ReturnType<typeof opendir>> | undefined;
+  try {
+    dh = await opendir(base);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return empty(null); // base 부재 = 빈 정상(A5be)
+    return empty("scan_error");
+  }
+  try {
+    for await (const e of dh) {
+      if (Date.now() - start > SCAN_DEADLINE_MS) { deadlineHit = true; break; }
+      if (!e.isDirectory() || !isSafeSegment(e.name)) continue;
+      names.push(e.name);
+      if (names.length >= MAX_RUN_DIRS) { limitReached = true; break; }
+    }
+  } catch { scanError = true; }
+  finally { if (dh) await dh.close().catch(() => {}); }
+
+  names.sort(); names.reverse(); // 시계열 runId 최신 우선(best-effort — 아래 recordedAtMs desc 가 최종 권위)
+
+  const cands: Array<{ runId: string; recordedAtMs: number; isMtime: boolean }> = [];
+  let usedMtime = false;
+  for (const name of names) {
+    if (Date.now() - start > SCAN_DEADLINE_MS) { deadlineHit = true; break; }
+    let l;
+    try { l = await lstat(join(base, name)); } catch { continue; }
+    if (l.isSymbolicLink() || !l.isDirectory()) continue; // symlink run dir backstop(권위는 safeRunDir)
+    const bt = l.birthtimeMs;
+    let recordedAtMs: number, isMtime = false;
+    if (Number.isFinite(bt) && bt > 0) { recordedAtMs = bt; }
+    else { recordedAtMs = l.mtimeMs; usedMtime = true; isMtime = true; }
+    cands.push({ runId: name, recordedAtMs, isMtime });
+  }
+  cands.sort((a, b) => b.recordedAtMs - a.recordedAtMs || (b.runId < a.runId ? -1 : b.runId > a.runId ? 1 : 0));
+  const recordedAtSource: "birthtime" | "mtime" = usedMtime ? "mtime" : "birthtime";
+
+  const items: RunRef[] = [];
+  let reads = 0;
+  for (const c of cands) {
+    if (Date.now() - start > SCAN_DEADLINE_MS) { deadlineHit = true; break; }
+    if (reads >= MAX_RUNS_SCAN) { limitReached = true; break; } // 내용 read 상한(OOM 방어)
+    reads++;
+    const dir = await safeRunDir(root, c.runId, anchors, sub); // 권위 심링크/경계 거부·선계산 앵커
+    if (!dir) continue;
+    items.push({ runId: c.runId, dir, recordedAtMs: c.recordedAtMs, isMtime: c.isMtime });
+  }
+  const truncatedReason: BoundedRunEnum["truncatedReason"] =
+    deadlineHit ? "deadline_exceeded" : limitReached ? "limit_reached" : scanError ? "scan_error" : null;
+  return { items, scanned: reads, truncated: truncatedReason !== null, truncatedReason, recordedAtSource };
+}
+
+// 안전 run 디렉토리의 events.jsonl 을 스트리밍하며 스키마 통과 이벤트를 콜백에 전달(전체 read 금지·
+//   readCappedLines 재사용·MAX_EVENTS_PER_RUN 캡). 파손/과대/부재 = 안전 skip(throw 없음).
+// R1 HIGH(agy·DoS): (1) deadlineAt(공유 스캔 데드라인) 초과 시 즉시 중단, (2) 처리 라인 상한(MAX_EVENT_LINES_PER_RUN)
+//   으로 파손 라인 폭주(유효 event 0·count 미증가) 무한루프 차단. 중단 사유를 정직 반환(caller 가 커버리지 truncatedReason 로 노출).
+export interface StreamResult { truncated: boolean; reason: "deadline_exceeded" | "limit_reached" | null; }
+export async function streamRunEvents(
+  dir: string,
+  onEvent: (e: Event) => void,
+  opts: { maxEvents?: number; maxLines?: number; deadlineAt?: number } = {},
+): Promise<StreamResult> {
+  const maxEvents = opts.maxEvents ?? MAX_EVENTS_PER_RUN;
+  const maxLines = opts.maxLines ?? MAX_EVENT_LINES_PER_RUN;
+  const deadlineAt = opts.deadlineAt;
+  const h = await safeOpen(dir, "events.jsonl");
+  if (!h) return { truncated: false, reason: null };
+  let count = 0;   // 유효 event
+  let lines = 0;   // 처리 라인(파손 포함) — count 미증가 무한루프 바운드
+  let reason: StreamResult["reason"] = null;
+  try {
+    for await (const line of readCappedLines(h, deadlineAt)) { // R2 HIGH: drain 구간 데드라인/바이트캡 주입
+      if (deadlineAt !== undefined && Date.now() > deadlineAt) { reason = "deadline_exceeded"; break; } // 공유 데드라인
+      if (++lines > maxLines) { reason = "limit_reached"; break; }  // 파손 라인 폭주 차단(무한루프 아님)
+      if (!line || line.length > MAX_LINE) continue;
+      let obj: unknown;
+      try { obj = JSON.parse(line); } catch { continue; }
+      const v = isSchemaValid(Event, obj);
+      if (!v.ok) continue; // 구 events(agent/skill/usage=null 이어도 스키마 통과) 안전 파싱
+      onEvent(v.value);
+      if (++count >= maxEvents) { reason = "limit_reached"; break; } // 유효 event 상한 도달 = 부분 스캔(정직 노출)
+    }
+  } catch (e) {
+    // R2 HIGH: readCappedLines 가 drain 구간서 데드라인/바이트캡 초과로 abort 하면 그 사유를 정직 반영.
+    if (e instanceof LineReaderAbort) reason = e.abortReason;
+    /* 그 외 읽기 오류 → 부분 스캔(수집분 유지) */
+  }
+  finally { await h.close().catch(() => {}); }
+  return { truncated: reason !== null, reason };
 }
 
 export async function readRunAgents(root: string, runId: string) {

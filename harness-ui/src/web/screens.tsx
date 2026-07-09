@@ -1,7 +1,11 @@
 // 9화면(§IA: Overview·Build·Agents·Skills·Runs·Docs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
 // XSS: 전 텍스트 React escape. dangerouslySetInnerHTML 는 오직 renderMarkdown(markdown-it html:false + DOMPurify) 통과분에만(F5 DV8).
 import { useState, useEffect } from "react";
-import { useApi, Async, Badge, Card, Table } from "./ui.js";
+import { useApi, Async, Badge, Card, Table, ConfBadge, MetricCell } from "./ui.js";
+import {
+  type OverviewMetrics, type AgentsMetrics, type SkillsMetrics, type Coverage,
+  coverageSummary, coverageWindowText, truncatedReasonText, windowEmptyNotice, overviewSuggestions,
+} from "./metrics.js";
 import {
   apiPost, fetchArtifact, downloadDoc, downloadArtifact,
   encodeDocPath, DownloadTooLargeError,
@@ -24,7 +28,119 @@ type Stats = {
   evolution: Array<{ date: string; change: string; source: string }>;
 };
 
-// ── 1. Overview (A2·A3·A35-A38) ──
+// ── F6 관측성 계층 B (M9 · W1~W9) — 공용 커버리지 고지 + Overview/Agents/Skills 편입 ──
+// W6/A90: 커버리지(스캔·집계·측정비율·기간)·절단 원인(V13)을 정직 표기. "dead/미사용" 단정 금지.
+function CoverageNote({ cov }: { cov: Coverage }) {
+  const trunc = truncatedReasonText(cov.truncatedReason);
+  const win = coverageWindowText(cov);
+  return (
+    <div className="coverage-note" role="note">
+      <span className="muted">ⓘ {coverageSummary(cov)}{win && ` · 기간 ${win}`}
+        {cov.recordedAtSource === "mtime" && (
+          <span title="birthtime 미지원 파일시스템 — mtime 기준(관측 window 정렬 비결정 가능)"> · mtime 기준</span>
+        )}
+      </span>
+      {trunc && <span className="banner warn" role="note">⚠ {trunc}</span>}
+    </div>
+  );
+}
+
+// W2 Overview 효과성 카드(A63·A91) — 독립 로딩(W9/A83: metrics/overview 실패가 Overview 전체 미붕괴).
+function EffectivenessCard() {
+  const m = useApi<OverviewMetrics>("/api/metrics/overview");
+  return (
+    <Card title="효과성 지표 (F6 · 계층 B · 관측 파생)">
+      <Async state={m}>{(d) => <OverviewMetricsBody m={d} />}</Async>
+    </Card>
+  );
+}
+
+function OverviewMetricsBody({ m }: { m: OverviewMetrics }) {
+  const suggestions = overviewSuggestions(m);
+  return (
+    <>
+      {/* 계층 A 요약(progressive disclosure) — 핵심 지표만 한 줄, 상세는 접기 */}
+      <div className="metric-summary">
+        <span>총 run <b>{m.runCount}</b></span>
+        <span>성공률 <MetricCell mv={m.successRate} fmt="percent" /></span>
+        <span>실패율 <MetricCell mv={m.failureRate} fmt="percent" /></span>
+        <span>미관측 에이전트 <b>{m.unusedAgents}</b> · 스킬 <b>{m.unusedSkills}</b></span>
+      </div>
+      {/* W5 anti-Goodhart: 측정 → 행동유도 제안(순위/점수/자동강제 없음) */}
+      {suggestions.length > 0 && (
+        <ul className="suggestions" aria-label="관측 기반 제안(자동 조치 아님)">
+          {suggestions.map((s) => <li key={s.key}>💡 {s.text}</li>)}
+        </ul>
+      )}
+      {/* 계층 B 상세 접기(A91 과밀 방지) */}
+      <details className="tier-b">
+        <summary>상세 지표 (계층 B · 신뢰도 배지 동반)</summary>
+        <Table cols={["지표", "값", "산정 근거"]} rows={[
+          ["성공률", <MetricCell mv={m.successRate} fmt="percent" />, "status.state 직접 관측"],
+          ["실패율", <MetricCell mv={m.failureRate} fmt="percent" />, "status.state 직접 관측"],
+          ["평균 소요", <MetricCell mv={m.avgDurationMs} fmt="duration" />, "createdAt→updatedAt"],
+          ["재작업률", <MetricCell mv={m.reworkRate} fmt="percent" />, "이벤트명 프록시(추정)"],
+          ["리뷰 수렴(run당)", <MetricCell mv={m.reviewConvergence} fmt="float" />, "review 이벤트 평균(추정)"],
+          ["총 토큰", <MetricCell mv={m.totalTokens} fmt="int" />, "events.usage 실존 시 측정·부재 시 미귀속"],
+        ]} />
+      </details>
+      <CoverageNote cov={m.coverage} />
+    </>
+  );
+}
+
+// W3 Agents usage 섹션(A63) — 독립 로딩(W9). 토큰·호출·연결·선언≠관측 gap·미사용.
+function AgentsUsage() {
+  const m = useApi<AgentsMetrics>("/api/metrics/agents");
+  return (
+    <Card title="활용도 (F6 · 관측 window)">
+      <Async state={m}>{(d) => (
+        <>
+          {d.agents.length === 0
+            ? <p className="muted">선택 window 내 관측된 에이전트 없음(미측정 — 부재 단정 아님)</p>
+            : <Table cols={["에이전트", "run", "호출", "완료", "실패", "토큰"]} rows={d.agents.map((a) => [
+                a.agent, a.runs, a.invocations, a.completed, a.failed, <MetricCell mv={a.tokens} fmt="int" />,
+              ])} />}
+          {d.unusedInWindow.length > 0 && (
+            <div className="unused-block" role="note">
+              <p className="muted">🕳 {windowEmptyNotice("agent", d.coverage)}</p>
+              <p>{d.unusedInWindow.map((n) => <Badge key={n} kind="muted">{n}</Badge>)}</p>
+            </div>
+          )}
+          <CoverageNote cov={d.coverage} />
+        </>
+      )}</Async>
+    </Card>
+  );
+}
+
+// W4 Skills usage 섹션(A63) — 호출·점유(estimated 상한)·미사용 목록. 독립 로딩(W9).
+function SkillsUsage() {
+  const m = useApi<SkillsMetrics>("/api/metrics/skills");
+  return (
+    <Card title="활용도 (F6 · 관측 window)">
+      <Async state={m}>{(d) => (
+        <>
+          {d.skills.length === 0
+            ? <p className="muted">선택 window 내 관측된 스킬 없음(미측정 — 부재 단정 아님)</p>
+            : <Table cols={["스킬", "run", "호출", "토큰(점유·상한)"]} rows={d.skills.map((s) => [
+                s.skill, s.runs, s.invocations, <MetricCell mv={s.tokens} fmt="int" />,
+              ])} />}
+          {d.skills.length > 0 && <p className="muted"><ConfBadge confidence="estimated" /> 스킬 토큰은 경계 없음 → 상한 추정치(정확값 아님).</p>}
+          {d.unusedInWindow.length > 0 && (
+            <div className="unused-block" role="note">
+              <p className="muted">🕳 {windowEmptyNotice("skill", d.coverage)}</p>
+              <p>{d.unusedInWindow.map((n) => <Badge key={n} kind="muted">{n}</Badge>)}</p>
+            </div>
+          )}
+          <CoverageNote cov={d.coverage} />
+        </>
+      )}</Async>
+    </Card>
+  );
+}
+
+// ── 1. Overview (A2·A3·A35-A38 · F6 W2 효과성 카드) ──
 export function Overview() {
   const inv = useApi<Inv>("/api/harness");
   const rt = useApi<Rt>("/api/runtimes");
@@ -32,6 +148,8 @@ export function Overview() {
   return (
     <div className="screen">
       <h2>Overview</h2>
+      {/* F6 W2: 효과성 카드는 자체 metrics/overview 페치로 독립 로딩(W9/A83 — 실패해도 아래 카드 미붕괴) */}
+      <EffectivenessCard />
       <Async state={rt}>{(r) => (
         <Card title="런타임 (A2)">
           <Table cols={["런타임", "설치", "버전"]} rows={Object.entries(r).map(([k, v]) => [
@@ -133,6 +251,8 @@ export function Agents() {
           ) : null; })()}
         </div>
       )}</Async>
+      {/* F6 W3: usage 섹션은 자체 metrics/agents 페치로 독립 로딩(W9/A83) */}
+      <AgentsUsage />
     </div>
   );
 }
@@ -158,6 +278,8 @@ export function Skills() {
           ) : null; })()}
         </div>
       )}</Async>
+      {/* F6 W4: usage 섹션은 자체 metrics/skills 페치로 독립 로딩(W9/A83) */}
+      <SkillsUsage />
     </div>
   );
 }

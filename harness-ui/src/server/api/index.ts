@@ -9,6 +9,9 @@ import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
 import { docsTree } from "../adapters/docs.js";
 import { RunsQuery } from "../schemas.js";
+import { z } from "zod";
+import { overview as metricsOverview, agents as metricsAgents, skills as metricsSkills, type MetricsOptions } from "../adapters/metrics.js";
+import { MAX_RUNS_SCAN } from "../adapters/runs.js";
 import { isSafeSegment, isSafeDocsSegment } from "../lib/paths.js";
 import { openSafeFile, sendDownload, sendPreview, DOWNLOAD_MAX, VIEW_MAX } from "../lib/servefile.js";
 import { deniedPath, deniedDocsPath } from "../security.js";
@@ -100,6 +103,32 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
       return await sendPreview(reply, r, rel, VIEW_MAX);
     } finally { await r.fh.close().catch(() => {}); }
   });
+
+  // F6 metrics(M9 · 계층 B 읽기전용 집계). 입력 clamp·Zod. 빈/손상/디렉토리없음 → 안전 빈 응답(에러 아님).
+  //   from/to = ISO window(선택). limit = 집계 편입 run 상한(1..MAX_RUNS_SCAN clamp).
+  const MetricsQuery = z.object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+    limit: z.preprocess((v) => {
+      if (v === undefined || v === null || v === "") return undefined;
+      const n = typeof v === "number" ? v : Number.parseInt(String(v), 10);
+      if (!Number.isFinite(n)) return undefined;
+      return Math.min(MAX_RUNS_SCAN, Math.max(1, Math.trunc(n)));
+    }, z.number().int().min(1).max(MAX_RUNS_SCAN).optional()),
+  });
+  const parseMetricsOpts = (q: unknown): MetricsOptions => {
+    const p = MetricsQuery.safeParse(q ?? {});
+    if (!p.success) return {}; // 잘못된 window → 전체 집계로 안전 폴백(에러 아님·A5be)
+    const fromMs = p.data.from ? Date.parse(p.data.from) : null;
+    const toMs = p.data.to ? Date.parse(p.data.to) : null;
+    return { fromMs: Number.isFinite(fromMs) ? fromMs : null, toMs: Number.isFinite(toMs) ? toMs : null, limit: p.data.limit ?? null };
+  };
+  app.get<{ Querystring: Record<string, unknown> }>("/api/metrics/overview", async (req) =>
+    metricsOverview(projectRoot, parseMetricsOpts(req.query)));
+  app.get<{ Querystring: Record<string, unknown> }>("/api/metrics/agents", async (req) =>
+    metricsAgents(projectRoot, parseMetricsOpts(req.query)));
+  app.get<{ Querystring: Record<string, unknown> }>("/api/metrics/skills", async (req) =>
+    metricsSkills(projectRoot, parseMetricsOpts(req.query)));
 
   // drift
   app.get("/api/drift", async () => ({ findings: await detectDrift(projectRoot) }));

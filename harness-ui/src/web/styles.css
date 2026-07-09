@@ -100,3 +100,20 @@ td { word-break:break-word; }
 .md-body a { color:var(--accent); }
 .md-body table { margin:8px 0; }
 .md-body blockquote { border-left:3px solid var(--line); margin:8px 0; padding-left:12px; color:var(--muted); }
+
+/* F6 관측성 계층 B (M9) — confidence 배지·지표 셀·커버리지 고지. 색 단독 금지(아이콘 형태+텍스트+테두리). */
+.conf-badge { display:inline-flex; align-items:center; gap:3px; padding:0 6px; border-radius:10px; font-size:11px; font-weight:600; border:1px solid var(--line); vertical-align:middle; cursor:help; }
+.conf-badge .conf-icon { font-size:9px; line-height:1; }
+.conf-measured { color:var(--ok); border-color:var(--ok); }              /* ● 실선 */
+.conf-estimated { color:var(--warn); border-color:var(--warn); }         /* ◐ 실선 경고색 */
+.conf-unattributed { color:var(--muted); border-color:var(--muted); border-style:dashed; } /* ○ 점선(형태 차이 추가) */
+.metric-cell { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+.metric-missing { font-style:italic; }
+.metric-summary { display:flex; gap:18px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+.coverage-note { font-size:12px; margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+.suggestions { list-style:none; margin:8px 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.suggestions li { font-size:13px; border-left:3px solid var(--accent); padding-left:10px; }
+.unused-block { margin:10px 0; display:flex; flex-direction:column; gap:6px; }
+.unused-block .badge { margin:0 4px 4px 0; }
+details.tier-b > summary { cursor:pointer; color:var(--accent); font-size:13px; padding:6px 0; }
+details.tier-b[open] > summary { margin-bottom:8px; }

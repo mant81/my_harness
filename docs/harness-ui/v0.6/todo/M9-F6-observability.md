@@ -1,5 +1,11 @@
 # M9 — F6 관측성 계층 B (읽기전용 집계) 작업계획서
 
+> ✅ **완료(2026-07-09).** 구현·게이트·QA·배선·외부감사 전부 통과. 전 체크박스 완료.
+> - **게이트:** typecheck PASS · `npm run test` **296/296 PASS**(34 파일) · build PASS · M7 회귀 0 · 읽기전용(supervisor/API 쓰기 0).
+> - **과대표시 금지(핵심):** per-value confidence(응답 단일 confidence 없음)·measured=전 기여분 usage 있을 때만(부분→unattributed 강등·value null·0 위장 금지)·claude team/skill=상한 estimated·UI 아이콘+텍스트 배지(색비의존). AS1 usage 픽스처 회귀(measured↔unattributed) DoD 통과.
+> - **공용 리더 추출:** `enumerateRunsBounded`/`streamRunEvents`(앵커 `sub` 파라미터·기본 `_workspace/runs`·M13 재사용)·M7 본문 무수정→거부 스위트 회귀 0. `readCappedLines` drain 데드라인+64MB 백스톱(M7/M9 공유 DoS 봉쇄).
+> - **외부감사(codex+agy) R1~R3 → 최종 HIGH 0(양 엔진):** R1 measured 부분커버리지 과대표시·scan/streamRunEvents 데드라인 부재, R2 readCappedLines drain 데드라인 우회 순차 해소. rollup.json 캐싱은 대규모 시 이월(AS3). 원장: `_workspace/reviews/m9-code-r*`.
+
 > 정본: `docs/harness-ui/v0.6/design/design-v0.6.md` §F6.1~F6.5 · 수용기준 A60~A63 · UX A90 · §가정 AS1/AS2/AS3.
 > 상세 지표표·페이지 구성 단일 출처: `docs/harness-ui/v0.5/design/design-observability.md §2·§3·§7b`.
 > 구현 금지 — 본 문서는 체크리스트. 코드/테스트는 server-builder·web-builder·qa-verifier가 수행.
@@ -18,20 +24,20 @@
 ## 선행/선검증
 
 ### 선행 의존 (착수 전 확인 — 오케스트레이터 판정 대상)
-- [ ] **P0 — F4(M7) 산출물 실태 + 공용화 책임 [결정 반영·확정].** A60은 "F4 스캔 재사용·F4 공용 경화 바운드-리더 상속"을 명문화. 현재 코드(`adapters/runs.ts`) 실태(2026-07-09 대조):
+- [x] **P0 — F4(M7) 산출물 실태 + 공용화 책임 [결정 반영·확정].** A60은 "F4 스캔 재사용·F4 공용 경화 바운드-리더 상속"을 명문화. 현재 코드(`adapters/runs.ts`) 실태(2026-07-09 대조):
   - `safeRunDir`(L14-29)에 realpath 앵커(L20-22)·leaf lstat 심링크 거부(L23-24)·containment 재확인(L26)은 있으나 **앵커가 `runsDir(root)`=`_workspace/runs` 하드코딩(L16-17)**(파라미터 아님).
   - `safeOpen`(L33-42)·`readJsonSafe`(L43-49)는 파일명 allowlist·O_NOFOLLOW·fstat 정규파일 — 재사용 가능.
   - `listRuns`(L51-67)는 **전 디렉토리 열거** — FS-time(birthtime/mtime) desc 정렬·상위 `MAX_RUNS_SCAN` 캡 **미구현**.
   - `readEvents`(L89-121) FileHandle 스트리밍(`readLines`·MAX_LINE 256KB·전체 read 금지)은 재사용 가능(양호).
   - → **결정(봉합 아님):** M7은 앵커 파라미터화를 **하지 않고** 기존 `safeRunDir`를 `_workspace/runs`로 그대로 사용. FS-time 정렬·상위 N 열거는 M7 `queryRuns`가 신규 산출(F6이 그 열거 패턴 준용). **앵커 파라미터화(공용 리더 추출)는 M9 S1이 책임**(2번째 앵커 등장 지점) — M13(F8)이 재사용. **하드코딩 앵커 2벌 금지**(통합감사-#3). M9가 M7 열거 로직(FS-time 정렬·상위 N)을 흡수·공용화하되 M7 거부 스위트 회귀 0 보장.
-- [ ] **P1 — events.agent/skill/usage 소비 경로 확인.** `schemas.ts` L64-69에서 `agent`/`skill`/`usage`(nullable) 선반영 실재 확인 완료. F6은 **events의 per-event `agent`/`skill`로 귀속**(manifest 단수 `agent`는 F2/M10 델타 → **M9는 M10에 의존하지 않음**). agent별/skill별 롤업은 events 필드 기준으로 명시.
+- [x] **P1 — events.agent/skill/usage 소비 경로 확인.** `schemas.ts` L64-69에서 `agent`/`skill`/`usage`(nullable) 선반영 실재 확인 완료. F6은 **events의 per-event `agent`/`skill`로 귀속**(manifest 단수 `agent`는 F2/M10 델타 → **M9는 M10에 의존하지 않음**). agent별/skill별 롤업은 events 필드 기준으로 명시.
 
 ### AS1 선검증 — CLI 실 usage 방출 (필수·회귀 스위트)
 > 설계 §가정 AS1 상태 = **부분(스키마 선반영·실 방출 미검증)**. `measured`는 usage 증거 실존 시에만 부여. 부재 시 `unattributed` 강등(승격 절대 금지).
 
-- [ ] **AS1-a — 고정 CLI 출력 픽스처 2종 확보:** (1) usage **있는** 샘플(claude `result.usage` stream-json/`--json` · codex `TokenCount`), (2) usage **없는** 샘플. `test/fixtures/cli-usage/`에 events.jsonl 형태로 고정.
-- [ ] **AS1-b — measured↔unattributed 회귀 테스트:** usage 有 픽스처 → run 총량 `measured`, usage 無 픽스처 → 동일 지표 `unattributed`로 **강등**(measured 미승격·0 위장 없음)을 assert. 이 스위트는 **DoD 필수**(설계 §마일스톤 "AS1 스모크·estimated 라벨 회귀").
-- [ ] **AS1-c — 실 CLI 방출 스모크(가능 시):** 실제 CLI 1회 실행 산출 events에 usage 필드가 실존하는지 관측. 관측 불가/불일치 시 A61을 정직히 "픽스처 기반 강등 회귀"로 한정하고 실 방출 미검증을 열린 질문에 기록(가정 위 구현 금지).
+- [x] **AS1-a — 고정 CLI 출력 픽스처 2종 확보:** (1) usage **있는** 샘플(claude `result.usage` stream-json/`--json` · codex `TokenCount`), (2) usage **없는** 샘플. `test/fixtures/cli-usage/`에 events.jsonl 형태로 고정.
+- [x] **AS1-b — measured↔unattributed 회귀 테스트:** usage 有 픽스처 → run 총량 `measured`, usage 無 픽스처 → 동일 지표 `unattributed`로 **강등**(measured 미승격·0 위장 없음)을 assert. 이 스위트는 **DoD 필수**(설계 §마일스톤 "AS1 스모크·estimated 라벨 회귀").
+- [x] **AS1-c — 실 CLI 방출 스모크(가능 시):** 실제 CLI 1회 실행 산출 events에 usage 필드가 실존하는지 관측. 관측 불가/불일치 시 A61을 정직히 "픽스처 기반 강등 회귀"로 한정하고 실 방출 미검증을 열린 질문에 기록(가정 위 구현 금지).
 
 ## 작업 체크리스트
 
@@ -40,33 +46,33 @@
 **A. 공용 경화 바운드 on-read 리더 (M9가 추출·공용화 — 2번째 앵커 등장 지점)**
 > **[오케스트레이터 교차조정 결정]** M7(F4)은 기존 `safeRunDir`(runs.ts:14-29)/`safeOpen`(L33-42)을 앵커=`_workspace/runs`로 **그대로 사용**(파라미터화 안 함). F6이 **동일 앵커를 두 번째로 사용**하는 지점 → **M9가 `runs.ts`에서 `safeRunDir`/`safeOpen`을 앵커 파라미터로 추출·공용화**하고, M13(F8, `evals-rollup` 앵커)이 그 공용 리더를 재사용한다. **2벌 구현 금지**(통합감사-#3: 앵커는 파라미터·하드코딩 금지).
 
-- [ ] S1 — **[V3 확정·이 지점이 "공용 JSON/바운드 리더" 추출 책임]** `runs.ts`에서 `safeRunDir`/`safeOpen`(+ M7 신규 `readJsonCapped`)을 **앵커 파라미터로 추출**(anchor를 인자로 받는 공용 리더로 리팩토링; M7이 사용 중인 `_workspace/runs` 호출부는 anchor 인자 명시로 이관 — 기존 계약·거부 동작 회귀 0). 통합감사-#3 준수: 선계산 realpath 앵커·`isWithinRoot(anchor, real)`·per-세그먼트 `isSafeSegment`·전 하위 세그먼트 심링크/reparse 거부·leaf `O_NOFOLLOW`+`fstat` 정규파일·`MAX_JSON_BYTES`·open 후 containment 재확인. **[V3·리더 2종 구분]** 이 공용 리더는 **JSON/바운드 on-read 리더**(status/manifest/events 파싱용·`fstat.size` 캡·`readJsonCapped`)이며, **M8의 파일서빙 리더("safe file viewer" — 임의 산출물 스트리밍/뷰어)와는 다른 리더다**. 두 리더를 하나로 합치지 말 것(관심사·크기정책·응답형태 상이). **M13(F8) 선행 의존은 이 공용 JSON/바운드 리더를 가리킨다**(별도 앵커 `<state_home>/evals-rollup`로 재사용). **회귀 게이트: M7 `queryRuns`·`listRuns`·`getRun`·`readEvents`(L69-121)의 기존 거부 스위트(F4 R-1~R-8) 전건 유지.**
-- [ ] S2 — **이름 열거 → `fs.stat` birthtime/mtime desc 정렬 → 상위 `MAX_RUNS_SCAN`개**만 내용 read(R3-#1·R4-#1: runId 형식 무의존·**결정적 최신 N**·무작위 부분집합 아님). 스캔 바운드/페이지네이션은 F4.3 준용. **[V13 반영·truncated 두 원인 분리]** 집계 스캔도 M7과 동일하게 절단 원인을 **`truncatedReason: "limit_reached" | "deadline_exceeded" | null`로 분리**해 커버리지 메타(S8)에 노출 — 스캔 캡 도달과 `SCAN_DEADLINE_MS` 초과를 혼동하지 말 것. 데드라인 초과 부분집계는 **커버리지 신뢰도 하락으로 정직 반영**(0 위장 금지). `MAX_RUNS_SCAN`은 M7과 동일 상수(V13 현실화·예 1000)를 공유.
-- [ ] S3 — 손상 run **quarantine**(파싱 실패 skip·집계에서 제외·집계 신뢰도에 반영, 조용한 0 위장 금지).
+- [x] S1 — **[V3 확정·이 지점이 "공용 JSON/바운드 리더" 추출 책임]** `runs.ts`에서 `safeRunDir`/`safeOpen`(+ M7 신규 `readJsonCapped`)을 **앵커 파라미터로 추출**(anchor를 인자로 받는 공용 리더로 리팩토링; M7이 사용 중인 `_workspace/runs` 호출부는 anchor 인자 명시로 이관 — 기존 계약·거부 동작 회귀 0). 통합감사-#3 준수: 선계산 realpath 앵커·`isWithinRoot(anchor, real)`·per-세그먼트 `isSafeSegment`·전 하위 세그먼트 심링크/reparse 거부·leaf `O_NOFOLLOW`+`fstat` 정규파일·`MAX_JSON_BYTES`·open 후 containment 재확인. **[V3·리더 2종 구분]** 이 공용 리더는 **JSON/바운드 on-read 리더**(status/manifest/events 파싱용·`fstat.size` 캡·`readJsonCapped`)이며, **M8의 파일서빙 리더("safe file viewer" — 임의 산출물 스트리밍/뷰어)와는 다른 리더다**. 두 리더를 하나로 합치지 말 것(관심사·크기정책·응답형태 상이). **M13(F8) 선행 의존은 이 공용 JSON/바운드 리더를 가리킨다**(별도 앵커 `<state_home>/evals-rollup`로 재사용). **회귀 게이트: M7 `queryRuns`·`listRuns`·`getRun`·`readEvents`(L69-121)의 기존 거부 스위트(F4 R-1~R-8) 전건 유지.**
+- [x] S2 — **이름 열거 → `fs.stat` birthtime/mtime desc 정렬 → 상위 `MAX_RUNS_SCAN`개**만 내용 read(R3-#1·R4-#1: runId 형식 무의존·**결정적 최신 N**·무작위 부분집합 아님). 스캔 바운드/페이지네이션은 F4.3 준용. **[V13 반영·truncated 두 원인 분리]** 집계 스캔도 M7과 동일하게 절단 원인을 **`truncatedReason: "limit_reached" | "deadline_exceeded" | null`로 분리**해 커버리지 메타(S8)에 노출 — 스캔 캡 도달과 `SCAN_DEADLINE_MS` 초과를 혼동하지 말 것. 데드라인 초과 부분집계는 **커버리지 신뢰도 하락으로 정직 반영**(0 위장 금지). `MAX_RUNS_SCAN`은 M7과 동일 상수(V13 현실화·예 1000)를 공유.
+- [x] S3 — 손상 run **quarantine**(파싱 실패 skip·집계에서 제외·집계 신뢰도에 반영, 조용한 0 위장 금지).
 
 **B. metrics 집계 어댑터 (`adapters/metrics.ts` — 신규)**
-- [ ] S4 — `overview()` 집계: 성공/실패율·평균 소요·재작업률·리뷰수렴(계층 B 지표표 §2 계약). run 총량 토큰은 events.usage 실파싱 시 `measured`, 부재 시 `unattributed`.
-- [ ] S5 — `agents()` 롤업: events.agent별 토큰·호출·성공. **claude team agent = 상한 `estimated`**(분해 미보장 → measured 절대 불가·AS2). codex agent별 usage 실존 시에만 measured, 부재 시 unattributed.
-- [ ] S6 — `skills()` 롤업: events.skill별 호출·점유 = **상한 `estimated`**(토큰 경계 없음 → measured 불가). **미사용/고아 목록**(정적 정의 존재 ∧ 관측 window 내 0회).
-- [ ] S7 — **per-value confidence(핵심):** 응답의 **각 metric 값**이 자기 `confidence:"measured"|"estimated"|"unattributed"`를 개별 동반. **응답 단일 confidence 금지**(한 응답에 measured/estimated/unattributed 공존 가능).
-- [ ] S8 — **커버리지 메타 동반(A90):** 각 집계에 관측 window(스캔한 run 수·기간)·신뢰도(measured 비율 등)·**`truncated`/`truncatedReason`([V13])**을 노출 → UI가 "선택 window 내 관측 없음 + 커버리지 + 절단 원인(상한 도달 vs 시간 초과)"을 정직 표기할 수 있게.
-- [ ] S9 — **읽기전용 불변:** supervisor·API 어떤 쓰기도 없음(I4/I8 무영향). rollup.json 쓰기 미도입(이월).
+- [x] S4 — `overview()` 집계: 성공/실패율·평균 소요·재작업률·리뷰수렴(계층 B 지표표 §2 계약). run 총량 토큰은 events.usage 실파싱 시 `measured`, 부재 시 `unattributed`.
+- [x] S5 — `agents()` 롤업: events.agent별 토큰·호출·성공. **claude team agent = 상한 `estimated`**(분해 미보장 → measured 절대 불가·AS2). codex agent별 usage 실존 시에만 measured, 부재 시 unattributed.
+- [x] S6 — `skills()` 롤업: events.skill별 호출·점유 = **상한 `estimated`**(토큰 경계 없음 → measured 불가). **미사용/고아 목록**(정적 정의 존재 ∧ 관측 window 내 0회).
+- [x] S7 — **per-value confidence(핵심):** 응답의 **각 metric 값**이 자기 `confidence:"measured"|"estimated"|"unattributed"`를 개별 동반. **응답 단일 confidence 금지**(한 응답에 measured/estimated/unattributed 공존 가능).
+- [x] S8 — **커버리지 메타 동반(A90):** 각 집계에 관측 window(스캔한 run 수·기간)·신뢰도(measured 비율 등)·**`truncated`/`truncatedReason`([V13])**을 노출 → UI가 "선택 window 내 관측 없음 + 커버리지 + 절단 원인(상한 도달 vs 시간 초과)"을 정직 표기할 수 있게.
+- [x] S9 — **읽기전용 불변:** supervisor·API 어떤 쓰기도 없음(I4/I8 무영향). rollup.json 쓰기 미도입(이월).
 
 **C. API 라우트 (`api/index.ts`)**
-- [ ] S10 — `GET /api/metrics/overview` · `GET /api/metrics/agents` · `GET /api/metrics/skills` 3종 등록. 각 엔드포인트 스캔 바운드·페이지네이션(F4.3 준용·동일 OOM 방어). 입력(있으면) Zod·clamp.
-- [ ] S11 — 빈/손상/디렉토리 없음 → 안전 빈 응답(A5be 준용·에러 아님).
+- [x] S10 — `GET /api/metrics/overview` · `GET /api/metrics/agents` · `GET /api/metrics/skills` 3종 등록. 각 엔드포인트 스캔 바운드·페이지네이션(F4.3 준용·동일 OOM 방어). 입력(있으면) Zod·clamp.
+- [x] S11 — 빈/손상/디렉토리 없음 → 안전 빈 응답(A5be 준용·에러 아님).
 
 ### 웹 (web-builder · `src/web/**`)
 
-- [ ] W1 — **confidence 배지 컴포넌트 신규(A62·A90):** measured/estimated/unattributed = **아이콘 + 텍스트**(색만으로 구분 금지)·`measured`와 시각 구분·**툴팁에 산정식**. 기존 `Badge`(ok/warn/err/muted)와 별개(재사용 불가 — 의미 다름).
-- [ ] W2 — **Overview 효과성 카드(A63·A91):** 성공률·재작업률·미사용 에이전트/스킬·리뷰수렴. `/insights`를 Overview로 흡수. **progressive disclosure**(계층 A 요약 → 계층 B 상세 접기·과밀 방지·A91).
-- [ ] W3 — **Agents 상세 usage 섹션(A63):** 토큰·호출·연결·선언≠관측 gap. per-value confidence 배지 부착.
-- [ ] W4 — **Skills 상세 usage 섹션(A63):** 호출·점유(estimated)·미사용 목록.
-- [ ] W5 — **anti-Goodhart(A63):** 행동유도형 지표(미사용/고아/방치) 위주·순위/점수 최소화·측정→제안(자동 강제 금지).
-- [ ] W6 — **관측 window UX(A90·UX-R2-#3):** "dead/미사용" 단정 **금지**. 바운드 최근-N에서 0회면 **"선택 window(관측 기간·run 수) 내 관측 없음" + 커버리지·신뢰도 명시**. 진짜 "dead"는 전 생애 증거(정적 정의 존재 ∧ 전기간 무관측)일 때만.
-- [ ] W7 — **정확값 위장 금지(A62):** estimated/unattributed를 measured처럼 렌더 금지·0 위장 금지·툴팁 산정식 노출.
-- [ ] W8 — 3-state(빈/로딩/에러·A46) 및 기존 화면 패턴(테이블+상세 패널) 준수(A91).
-- [ ] W9 — **[A83/A92 회귀 · V6 반영]** **A83(패널별 독립로딩·부분실패 격리):** Overview 효과성 카드·Agents usage 섹션·Skills usage 섹션·confidence 배지 영역이 **각 metrics 엔드포인트별 독립 로딩/에러**를 가져 한 집계(예 `/api/metrics/skills`) 실패가 Overview 전체를 무너뜨리지 않도록 격리(부분 렌더 + 해당 패널만 에러). **A92(접근성 WCAG AA):** confidence 배지(measured/estimated/unattributed)·커버리지 표기·usage 테이블이 **키보드 조작 가능**·**포커스 링 가시**·**색 대비 AA**·**색만으로 구분 금지**(배지는 이미 아이콘+텍스트 규칙 W1과 정합 — 색 단독 금지 재확인). qa-verifier/web-builder 공통 회귀.
+- [x] W1 — **confidence 배지 컴포넌트 신규(A62·A90):** measured/estimated/unattributed = **아이콘 + 텍스트**(색만으로 구분 금지)·`measured`와 시각 구분·**툴팁에 산정식**. 기존 `Badge`(ok/warn/err/muted)와 별개(재사용 불가 — 의미 다름).
+- [x] W2 — **Overview 효과성 카드(A63·A91):** 성공률·재작업률·미사용 에이전트/스킬·리뷰수렴. `/insights`를 Overview로 흡수. **progressive disclosure**(계층 A 요약 → 계층 B 상세 접기·과밀 방지·A91).
+- [x] W3 — **Agents 상세 usage 섹션(A63):** 토큰·호출·연결·선언≠관측 gap. per-value confidence 배지 부착.
+- [x] W4 — **Skills 상세 usage 섹션(A63):** 호출·점유(estimated)·미사용 목록.
+- [x] W5 — **anti-Goodhart(A63):** 행동유도형 지표(미사용/고아/방치) 위주·순위/점수 최소화·측정→제안(자동 강제 금지).
+- [x] W6 — **관측 window UX(A90·UX-R2-#3):** "dead/미사용" 단정 **금지**. 바운드 최근-N에서 0회면 **"선택 window(관측 기간·run 수) 내 관측 없음" + 커버리지·신뢰도 명시**. 진짜 "dead"는 전 생애 증거(정적 정의 존재 ∧ 전기간 무관측)일 때만.
+- [x] W7 — **정확값 위장 금지(A62):** estimated/unattributed를 measured처럼 렌더 금지·0 위장 금지·툴팁 산정식 노출.
+- [x] W8 — 3-state(빈/로딩/에러·A46) 및 기존 화면 패턴(테이블+상세 패널) 준수(A91).
+- [x] W9 — **[A83/A92 회귀 · V6 반영]** **A83(패널별 독립로딩·부분실패 격리):** Overview 효과성 카드·Agents usage 섹션·Skills usage 섹션·confidence 배지 영역이 **각 metrics 엔드포인트별 독립 로딩/에러**를 가져 한 집계(예 `/api/metrics/skills`) 실패가 Overview 전체를 무너뜨리지 않도록 격리(부분 렌더 + 해당 패널만 에러). **A92(접근성 WCAG AA):** confidence 배지(measured/estimated/unattributed)·커버리지 표기·usage 테이블이 **키보드 조작 가능**·**포커스 링 가시**·**색 대비 AA**·**색만으로 구분 금지**(배지는 이미 아이콘+텍스트 규칙 W1과 정합 — 색 단독 금지 재확인). qa-verifier/web-builder 공통 회귀.
 
 ## 수용기준 → 테스트 매핑
 
