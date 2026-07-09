@@ -34,10 +34,13 @@ async function readCappedDef(p: string): Promise<string | null> {
   } catch { return null; }
   finally { await fh.close().catch(() => {}); }
 }
+// agy#1(R1 HIGH·스캔 상한 DoS): 반환 dir 수에 MAX_AGENT_FILES 개수 상한(slice) 적용 —
+//   listFiles 와 동일 바운드. `.claude/skills` 하위 수십만 dir(scanSkillDir·readSkills·inventory)에서
+//   무제한 스캔(CPU/IO/OOM)을 차단. 상한 초과분은 미스캔(fail-safe: 편집 대상 미발견=404, 은폐 아님).
 async function listDirs(dir: string): Promise<string[]> {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name).slice(0, MAX_AGENT_FILES);
   } catch { return []; }
 }
 
@@ -49,7 +52,7 @@ function stripQuotes(s: string): string {
   }
   return t;
 }
-function parseFrontmatter(textIn: string): Record<string, string> {
+export function parseFrontmatter(textIn: string): Record<string, string> {
   const text = textIn.replace(/^\uFEFF/, ""); // BOM 제거
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!m) return {};
@@ -204,6 +207,58 @@ export async function readSkills(root: string): Promise<SkillInfo[]> {
     }
   }
   return out;
+}
+
+// --- F7(M12) 편집 대상 정규 sourcePath 재조회 (DW2) --------------------------
+// 클라이언트 경로 신뢰 금지 — :name(논리 frontmatter name) → 디스크에서 정규 sourcePath 를 서버가 재도출.
+// 편집 대상은 `.claude/agents/*.md`·`.claude/skills/{dir}/SKILL.md` **만**(I8 예외 경계). 재사용: 본 파일
+// 내부의 readCappedDef(O_NOFOLLOW·크기캡)·parseFrontmatter·listFiles/listDirs(신규 스캐너 발명 금지).
+export type DefResolution =
+  | { ok: true; sourcePath: string }
+  | { ok: false; error: "not-found" | "ambiguous-definition" | "codex-only-v0.7" };
+
+// 에이전트: `.claude/agents/*.md` 를 dedupe 없이 원본 스캔해 frontmatter name(부재 시 파일명) === name 매칭
+// 수를 센다. ≥2 → ambiguous(비결정 해소 금지). 0 이면 `.codex/agents/*.toml` 에 있으면 codex-only-v0.7·없으면 404.
+export async function resolveEditableAgent(root: string, name: string): Promise<DefResolution> {
+  const cdir = join(root, ".claude", "agents");
+  const claudeMatches: string[] = [];
+  for (const f of await listFiles(cdir, ".md")) {
+    const text = await readCappedDef(join(cdir, f));
+    if (text === null) continue;
+    const canonical = parseFrontmatter(text).name ?? f.replace(/\.md$/, "");
+    if (canonical === name) claudeMatches.push(f);
+  }
+  if (claudeMatches.length > 1) return { ok: false, error: "ambiguous-definition" };
+  if (claudeMatches.length === 1) return { ok: true, sourcePath: ".claude/agents/" + claudeMatches[0]! };
+  for (const f of await listFiles(join(root, ".codex", "agents"), ".toml")) {
+    const text = await readCappedDef(join(root, ".codex", "agents", f));
+    if (text === null) continue;
+    const nm = text.match(/^\s*name\s*=\s*["'](.+?)["']/m);
+    if ((nm?.[1] ?? f.replace(/\.toml$/, "")) === name) return { ok: false, error: "codex-only-v0.7" };
+  }
+  return { ok: false, error: "not-found" };
+}
+
+// 스킬: `.claude/skills/{dir}/SKILL.md` 를 **dedupe 없이** 원본 스캔(readSkills 의 교차 dedupe 가 동일 name
+// 두 dir 을 하나로 병합해 모호성을 은폐하므로 재사용 금지). canonical(fm.name ?? dir) === name 매칭 dir 수를 센다.
+// ≥2 → ambiguous. 0 이면 `.agents/skills` 에 있으면 codex-only-v0.7·없으면 404.
+async function scanSkillDir(root: string, base: string, name: string): Promise<string[]> {
+  const sdir = join(root, base);
+  const matches: string[] = [];
+  for (const dir of await listDirs(sdir)) {
+    if (!isSafeSegment(dir)) continue;
+    const text = await readCappedDef(join(sdir, dir, "SKILL.md"));
+    if (text === null) continue;
+    if ((parseFrontmatter(text).name ?? dir) === name) matches.push(dir);
+  }
+  return matches;
+}
+export async function resolveEditableSkill(root: string, name: string): Promise<DefResolution> {
+  const claudeMatches = await scanSkillDir(root, ".claude/skills", name);
+  if (claudeMatches.length > 1) return { ok: false, error: "ambiguous-definition" };
+  if (claudeMatches.length === 1) return { ok: true, sourcePath: ".claude/skills/" + claudeMatches[0]! + "/SKILL.md" };
+  if ((await scanSkillDir(root, ".agents/skills", name)).length >= 1) return { ok: false, error: "codex-only-v0.7" };
+  return { ok: false, error: "not-found" };
 }
 
 export async function harnessInventory(root: string) {

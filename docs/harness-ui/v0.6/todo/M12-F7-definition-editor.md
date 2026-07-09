@@ -1,5 +1,12 @@
 # M12 — F7 정의 편집기 작업계획서 (체크리스트)
 
+> ✅ **완료(2026-07-10).** 구현·게이트·QA·보안감사·외부감사 전부 통과. 전 체크박스 완료.
+> - **게이트:** typecheck PASS · `npm run test` **567 pass / 1 skip** · build PASS · `test:def-differential` 15/15 · v0.5 회귀 0.
+> - **첫 mutating·최대 공격면(DW1~DW11):** 스코프 게이트 definitionEditEnabled(기본 off·fail-closed)·이름→정규 sourcePath 서버 재조회(409 ambiguous·codex-only)·pathId 바인딩·`writeDefSafe` hardened(TOCTOU 부모 체인 pre/post 재검증·`.claude` 밖 write 물리 차단)·strict YAML(yaml@2.7.1·앵커/멀티도큐/중복키/`!!tag` 거부)·완전 스키마 passthrough·name 불변·canonical 재직렬화(LF·NFC 정규화·**write≤read cap 불변식**→은폐 차단)·낙관적 동시성(baseHash 409·정의별 뮤텍스)·opaque 백업·rollback 계약·편집≠실행·evalProposal fail-closed(crypto=M13).
+> - **AS6 정직 격하:** claude CLI frontmatter 격리 파서 진입점 부재(2.1.205) 확인 → A75를 "편집기 idempotence + 앱 리더(harness.ts) 파싱 등가"로 격하(외부 CLI 등가 주장 없음·residual risk 문서화).
+> - **QA·보안감사·외부감사(codex+agy) R1~R3 → 최종 HIGH 0(양 엔진):** TOCTOU write·scan-cap·CRLF·크기상한 은폐·temp 누수 순차 해소. 원장: `_workspace/reviews/m12-code-r*`.
+
+
 > 정본: `docs/harness-ui/v0.6/design/design-v0.6.md` §F7.1~F7.8 · DW1~DW11 · A72~A80 · UX A81/A85/A86/A93 · §위협 스위트 F7-편집 · §가정 AS6/AS7.
 > 담당 분리: server-builder=`harness-ui/src/server/**` · web-builder=`harness-ui/src/web/**`. 구현·커밋은 각 builder 몫. 본 문서는 기획·분해·정합성 점검만.
 
@@ -17,15 +24,15 @@
 
 ## 선행/선검증 (착수 전 반드시 — 가정 위에 구현 금지)
 
-- [ ] **[최우선·AS6] differential 게이트 리더 진입점 스모크.** claude CLI가 "에이전트/스킬 frontmatter를 격리 파싱해 그 결과를 관측 가능한 형태(JSON/구조화 출력)로 방출"하는 **실제 진입점이 존재하는지** 스모크로 확인. 확인 방법: `claude --help`/서브커맨드 조사, frontmatter만 파싱해 stdout으로 내보내는 명령 존재 여부, `--version` 핀 고정 가능 여부.
+- [x] **[최우선·AS6] differential 게이트 리더 진입점 스모크.** claude CLI가 "에이전트/스킬 frontmatter를 격리 파싱해 그 결과를 관측 가능한 형태(JSON/구조화 출력)로 방출"하는 **실제 진입점이 존재하는지** 스모크로 확인. 확인 방법: `claude --help`/서브커맨드 조사, frontmatter만 파싱해 stdout으로 내보내는 명령 존재 여부, `--version` 핀 고정 가능 여부.
   - **존재 시:** A75 F7.8 게이트를 설계대로 유지(편집기 재직렬화본 → 실 런타임 리더 파싱 → 정규화 JSON zero-divergence 비교).
   - **부재 시(예상 위험):** A75를 **"우리 파서 라운드트립 안정성 게이트"로 정직히 격하** — 편집기 파서(추출→strict YAML→Zod→canonical 재직렬화) 자체의 idempotent 라운드트립(재직렬화본을 다시 파싱해도 동일 정규화 JSON)만 증명. **오케스트레이터에 명시 보고**(tautological 위험 — A≡B가 "같은 파서를 두 번 돌린 것"이면 게이트가 아무것도 증명 못 함). → 아래 §정합성/열린 질문 #1.
-- [ ] **[M11 의존] F3.7 공유 config 인프라 실재 확인.** 현재 코드에 `loadConfig`·`<state_home>/config.json`·`projectsHome`·`definitionEditEnabled`·per-leaf passthrough 원자 RMW가 **전무**(Grep 확인됨 — 브랜치 `feat/harness-ui-v0.5`). M12 DW1/DW8(게이트 노브)은 F3.7 config 위에 얹음.
+- [x] **[M11 의존] F3.7 공유 config 인프라 실재 확인.** 현재 코드에 `loadConfig`·`<state_home>/config.json`·`projectsHome`·`definitionEditEnabled`·per-leaf passthrough 원자 RMW가 **전무**(Grep 확인됨 — 브랜치 `feat/harness-ui-v0.5`). M12 DW1/DW8(게이트 노브)은 F3.7 config 위에 얹음.
   - M11(F3) 선완료로 `loadConfig`(버전드 봉투·필드별 독립 복구·root passthrough)·원자 RMW·뮤텍스가 존재해야 함. **부재 시 M12 착수 전 오케스트레이터에 순서 확인** — M11 미완이면 config 인프라를 M12에서 공동 구축해야 하며 공수·리스크 증가.
   - `definitionEditEnabled`는 M12가 config 스키마에 **additive**로 추가(F3.7 공유 필드). projectRoot/projectsHome/evals **clobber 금지**.
-- [ ] **[신규 의존] strict YAML 라이브러리 부재 확인됨.** `harness-ui/package.json`에 `yaml`/`js-yaml` 없음. 현행 `harness.ts:parseFrontmatter`(30~47행)는 **정규식 기반 간이 파서** — 앵커/alias·멀티도큐·중복키·`!!tag`를 **거부하지 못함**. DW5 strict YAML은 **신규 의존 추가** 필요(예: `yaml` uniqueKeys/strict). server-builder 착수 전 의존 추가 승인 확인.
-- [ ] **[AS7] 위협모델 전제 확인.** F7은 로컬 단일사용자·편집자=실행자 전제(권한 상향은 명시적 2단계). 다중 사용자 시나리오는 v0.6 비대상 — 계획에 재검토 트리거만 명시.
-- [ ] **[DW11/M13 결속] evalProposal 필드는 이번엔 설계·스키마만.** F8 crypto(nonce 상태머신·envelope HMAC·config-hash·A106 재평가)는 M13 의존. M12에서는 PUT body에 `evalProposal?` 필드를 **파싱만** 하고, **존재 시 fail-closed 거부**(일반 편집으로 무음 통과 금지 — 아래 작업 참조). → §정합성/열린 질문 #2.
+- [x] **[신규 의존] strict YAML 라이브러리 부재 확인됨.** `harness-ui/package.json`에 `yaml`/`js-yaml` 없음. 현행 `harness.ts:parseFrontmatter`(30~47행)는 **정규식 기반 간이 파서** — 앵커/alias·멀티도큐·중복키·`!!tag`를 **거부하지 못함**. DW5 strict YAML은 **신규 의존 추가** 필요(예: `yaml` uniqueKeys/strict). server-builder 착수 전 의존 추가 승인 확인.
+- [x] **[AS7] 위협모델 전제 확인.** F7은 로컬 단일사용자·편집자=실행자 전제(권한 상향은 명시적 2단계). 다중 사용자 시나리오는 v0.6 비대상 — 계획에 재검토 트리거만 명시.
+- [x] **[DW11/M13 결속] evalProposal 필드는 이번엔 설계·스키마만.** F8 crypto(nonce 상태머신·envelope HMAC·config-hash·A106 재평가)는 M13 의존. M12에서는 PUT body에 `evalProposal?` 필드를 **파싱만** 하고, **존재 시 fail-closed 거부**(일반 편집으로 무음 통과 금지 — 아래 작업 참조). → §정합성/열린 질문 #2.
 
 ---
 
@@ -34,84 +41,84 @@
 ### A. 서버 — definition GET/PUT/rollback (server-builder · `src/server/**`)
 
 **A-1. 이름→정규경로 서버 재조회 + 정체성 바인딩 (DW2 · A72)**
-- [ ] `GET /api/agents/:name/definition` · `GET /api/skills/:name/definition` 추가.
-- [ ] **에이전트 = (b) `readAgents` 재사용** — `readAgents`는 `sourcePath` 필드 반환(harness.ts:59)이므로 `:name`(논리 frontmatter name)으로 돌려 **디스크에서 정규 sourcePath 재조회**. 클라이언트 경로/파일명 페이로드 **금지**.
-- [ ] **⚠️ [V7·MED] 스킬 = (c) dedupe 전 원본 스캔 신규 구현(순수 재사용 아님).** `readSkills`(harness.ts:72-97)는 **`sourcePath` 필드가 없고(`runtimePaths: string[]`만 노출) + canonical name 기준으로 `.claude`/`.agents` 교차 dedupe(82~89행)** → 그대로 재사용하면 (1) 정규경로를 못 얻고 (2) dedupe가 모호성을 은폐한다. **∴ 편집 대상 해소는 `readSkills`가 아니라 `.claude/skills/*/SKILL.md`를 dedupe 없이 원본 스캔하는 전용 조회를 신규 구현** — frontmatter name → 매칭된 `.claude/skills/{dir}/SKILL.md` 목록을 그대로(병합 없이) 수집해 정규경로·매칭 수를 산출.
-- [ ] **중복 name → `409 ambiguous-definition`(비결정 해소 금지·필수 테스트):** 동일 frontmatter name을 가진 `.claude` SKILL.md가 **2개 이상**(예 서로 다른 두 `.claude/skills/{dir}/SKILL.md`)이면 dedupe 전 원본 매칭 수 ≥ 2로 판정해 **409**. **`readSkills` dedupe 리스트로 판정 시 이 두 개가 하나로 병합돼 모호성을 놓치므로 금지.** → 거부 스위트에 "동일 name 2개 SKILL.md → 409 ambiguous" 케이스 필수(TDD Red).
-- [ ] 스킬 정규 sourcePath = **`.claude/skills/{dir}/SKILL.md`** 고정. `.agents` 전용 스킬(=`.claude`에 없음) → **`409 codex-only-v0.7`**.
-- [ ] 미존재 → `404`.
-- [ ] 응답: `{ name, sourcePath, pathId(=sha256(정규 sourcePath)), content, baseHash(=sha256 내용), mtimeMs, editable }`. `editable`은 `definitionEditEnabled` 판독값 반영.
+- [x] `GET /api/agents/:name/definition` · `GET /api/skills/:name/definition` 추가.
+- [x] **에이전트 = (b) `readAgents` 재사용** — `readAgents`는 `sourcePath` 필드 반환(harness.ts:59)이므로 `:name`(논리 frontmatter name)으로 돌려 **디스크에서 정규 sourcePath 재조회**. 클라이언트 경로/파일명 페이로드 **금지**.
+- [x] **⚠️ [V7·MED] 스킬 = (c) dedupe 전 원본 스캔 신규 구현(순수 재사용 아님).** `readSkills`(harness.ts:72-97)는 **`sourcePath` 필드가 없고(`runtimePaths: string[]`만 노출) + canonical name 기준으로 `.claude`/`.agents` 교차 dedupe(82~89행)** → 그대로 재사용하면 (1) 정규경로를 못 얻고 (2) dedupe가 모호성을 은폐한다. **∴ 편집 대상 해소는 `readSkills`가 아니라 `.claude/skills/*/SKILL.md`를 dedupe 없이 원본 스캔하는 전용 조회를 신규 구현** — frontmatter name → 매칭된 `.claude/skills/{dir}/SKILL.md` 목록을 그대로(병합 없이) 수집해 정규경로·매칭 수를 산출.
+- [x] **중복 name → `409 ambiguous-definition`(비결정 해소 금지·필수 테스트):** 동일 frontmatter name을 가진 `.claude` SKILL.md가 **2개 이상**(예 서로 다른 두 `.claude/skills/{dir}/SKILL.md`)이면 dedupe 전 원본 매칭 수 ≥ 2로 판정해 **409**. **`readSkills` dedupe 리스트로 판정 시 이 두 개가 하나로 병합돼 모호성을 놓치므로 금지.** → 거부 스위트에 "동일 name 2개 SKILL.md → 409 ambiguous" 케이스 필수(TDD Red).
+- [x] 스킬 정규 sourcePath = **`.claude/skills/{dir}/SKILL.md`** 고정. `.agents` 전용 스킬(=`.claude`에 없음) → **`409 codex-only-v0.7`**.
+- [x] 미존재 → `404`.
+- [x] 응답: `{ name, sourcePath, pathId(=sha256(정규 sourcePath)), content, baseHash(=sha256 내용), mtimeMs, editable }`. `editable`은 `definitionEditEnabled` 판독값 반영.
 
 **A-2. 쓰기 경로탈출 방어 (DW3 · A73)**
-- [ ] 해소된 sourcePath를 **projectRoot realpath 앵커(선계산)** 기준 검증. `runs.ts:safeRunDir`(14~29행) 패턴을 **앵커 파라미터화**해 재사용(하드코딩 앵커 금지 — harness-ui-impl §공용 경화 리더).
-- [ ] **projectRoot 하위 상대 세그먼트(`.claude/…`)만** lstat 심링크/reparse 무조건 거부(I6 통일 — 절대 상위부는 containment, 정상환경 오거부 없음). `paths.ts:isSafeSegment`(18)·`isWithinRoot`(24) 재사용.
-- [ ] 부모 디렉토리 realpath 확인 + leaf 위치·확장자 화이트리스트(agents=`.claude/agents/*.md`·skills=`.claude/skills/*/SKILL.md`) + `.claude` 밖 거부.
-- [ ] `MAX_DEF_BYTES`(예 256KB) 크기상한 초과 거부. 모든 실패 fail-closed **400**.
+- [x] 해소된 sourcePath를 **projectRoot realpath 앵커(선계산)** 기준 검증. `runs.ts:safeRunDir`(14~29행) 패턴을 **앵커 파라미터화**해 재사용(하드코딩 앵커 금지 — harness-ui-impl §공용 경화 리더).
+- [x] **projectRoot 하위 상대 세그먼트(`.claude/…`)만** lstat 심링크/reparse 무조건 거부(I6 통일 — 절대 상위부는 containment, 정상환경 오거부 없음). `paths.ts:isSafeSegment`(18)·`isWithinRoot`(24) 재사용.
+- [x] 부모 디렉토리 realpath 확인 + leaf 위치·확장자 화이트리스트(agents=`.claude/agents/*.md`·skills=`.claude/skills/*/SKILL.md`) + `.claude` 밖 거부.
+- [x] `MAX_DEF_BYTES`(예 256KB) 크기상한 초과 거부. 모든 실패 fail-closed **400**.
 
 **A-3. 원자 쓰기 (DW4 · A74)**
-- [ ] `atomic.ts:writeAtomic`(7행) **재사용**(temp `wx`=O_EXCL·0600→fsync→rename→dir fsync). 신규 쓰기 루틴 발명 금지.
-- [ ] rename이 목적지 심링크를 따라가지 않고 엔트리 교체(write-through-symlink 불가)임을 회귀로 확인. 부모 dir 스왑은 DW3 realpath 앵커로 방어.
+- [x] `atomic.ts:writeAtomic`(7행) **재사용**(temp `wx`=O_EXCL·0600→fsync→rename→dir fsync). 신규 쓰기 루틴 발명 금지.
+- [x] rename이 목적지 심링크를 따라가지 않고 엔트리 교체(write-through-symlink 불가)임을 회귀로 확인. 부모 dir 스왑은 DW3 realpath 앵커로 방어.
 
 **A-4. 무결성 + 정규화 (DW5 · A75)**
-- [ ] **고정 추출:** frontmatter = 첫 `---`~다음 `---` 쌍(런타임 동일). 현행 `harness.ts` 정규식(32행 `/^---\r?\n([\s\S]*?)\r?\n---/`)이 이미 non-greedy 첫-쌍 추출 — 편집기도 **동일 고정 추출** 사용(differential 등가 전제). **본문(닫는 `---` 이후) `---`는 무해** — blanket 거부 철회(R4-#2).
-- [ ] **strict YAML 파싱**(신규 의존): 앵커/alias·멀티도큐먼트·중복 키·`!!tag` **거부**. 현행 간이 파서는 이 방어 없음 → 신규.
-- [ ] **완전 frontmatter Zod 스키마**(설계 F7.4 코드블록): `name`(min1 max120)·`description`(min1 max2000) 필수 strict + role/tools/skills/model(agent)·triggers/references(skill) 옵션 + **`.passthrough()` 미지필드 보존**. name 불변(`===` 요청 `:name`, 리네임 금지).
-- [ ] 통과분을 **canonical normalized YAML로 재직렬화**(passthrough 필드 포함·유실 0). 본문 비어있지 않음 확인.
-- [ ] 실패(필수 누락/YAML 위반/name 변경) → **400**. 거부는 필수 누락·폴리글롯·리네임뿐(옵션필드·본문`---`·passthrough는 ACCEPT).
+- [x] **고정 추출:** frontmatter = 첫 `---`~다음 `---` 쌍(런타임 동일). 현행 `harness.ts` 정규식(32행 `/^---\r?\n([\s\S]*?)\r?\n---/`)이 이미 non-greedy 첫-쌍 추출 — 편집기도 **동일 고정 추출** 사용(differential 등가 전제). **본문(닫는 `---` 이후) `---`는 무해** — blanket 거부 철회(R4-#2).
+- [x] **strict YAML 파싱**(신규 의존): 앵커/alias·멀티도큐먼트·중복 키·`!!tag` **거부**. 현행 간이 파서는 이 방어 없음 → 신규.
+- [x] **완전 frontmatter Zod 스키마**(설계 F7.4 코드블록): `name`(min1 max120)·`description`(min1 max2000) 필수 strict + role/tools/skills/model(agent)·triggers/references(skill) 옵션 + **`.passthrough()` 미지필드 보존**. name 불변(`===` 요청 `:name`, 리네임 금지).
+- [x] 통과분을 **canonical normalized YAML로 재직렬화**(passthrough 필드 포함·유실 0). 본문 비어있지 않음 확인.
+- [x] 실패(필수 누락/YAML 위반/name 변경) → **400**. 거부는 필수 누락·폴리글롯·리네임뿐(옵션필드·본문`---`·passthrough는 ACCEPT).
 
 **A-5. 낙관적 동시성 (DW6 · A76)**
-- [ ] PUT은 `{ content, baseHash, pathId, evalProposal? }` 수신(Zod). 서버가 **현재 디스크 내용 해시 재계산** → `baseHash` 불일치 시 **`409 stale-write`**.
-- [ ] `pathId` 재해소: name 재조회한 sourcePath의 pathId와 불일치 → **`409`**(GET↔PUT 다른 정의 타격 차단). mtime은 보조.
+- [x] PUT은 `{ content, baseHash, pathId, evalProposal? }` 수신(Zod). 서버가 **현재 디스크 내용 해시 재계산** → `baseHash` 불일치 시 **`409 stale-write`**.
+- [x] `pathId` 재해소: name 재조회한 sourcePath의 pathId와 불일치 → **`409`**(GET↔PUT 다른 정의 타격 차단). mtime은 보조.
 
 **A-6. 되돌리기·백업 (DW7/DW7b · A77)**
-- [ ] 백업 파일명 = **opaque `sha256(정규 sourcePath)` hex**(논리 name 보간 **절대 금지** — traversal 차단). 위치 `<state_home>/edit-backups/{hash}.bak`(직전 1개). `paths.ts:stateHome`(5) 재사용.
-- [ ] 백업 dir per-세그먼트 심링크/reparse 거부·기존 `.bak` 심링크면 거부·`O_EXCL` temp→`writeAtomic` 원자 교체(백업 심링크 write-through 불가).
-- [ ] `POST …/rollback` body `{ expectedCurrentHash, backupHash }`: 현재 디스크 해시==expectedCurrentHash(불일치 `409 stale-rollback`) + 백업 해시==backupHash(손상/변조 백업 거부) + 복원 대상 경로 **DW3 재실행** + 백업 내용 **DW5 무결성 재검증**(손상본 복원 차단) → 통과 시 `writeAtomic` 원자 복원.
-- [ ] 저장 응답에 `prevHash` 반환.
+- [x] 백업 파일명 = **opaque `sha256(정규 sourcePath)` hex**(논리 name 보간 **절대 금지** — traversal 차단). 위치 `<state_home>/edit-backups/{hash}.bak`(직전 1개). `paths.ts:stateHome`(5) 재사용.
+- [x] 백업 dir per-세그먼트 심링크/reparse 거부·기존 `.bak` 심링크면 거부·`O_EXCL` temp→`writeAtomic` 원자 교체(백업 심링크 write-through 불가).
+- [x] `POST …/rollback` body `{ expectedCurrentHash, backupHash }`: 현재 디스크 해시==expectedCurrentHash(불일치 `409 stale-rollback`) + 백업 해시==backupHash(손상/변조 백업 거부) + 복원 대상 경로 **DW3 재실행** + 백업 내용 **DW5 무결성 재검증**(손상본 복원 차단) → 통과 시 `writeAtomic` 원자 복원.
+- [x] 저장 응답에 `prevHash` 반환.
 
 **A-7. 게이트 노브 + 매 요청 판독 (DW1/DW8 · A78)**
-- [ ] `definitionEditEnabled`(기본 off·fail-closed) = F3.7 공유 config 필드(**신규 config 필드 — F3.7 공유**). PUT/rollback 진입 시 config에서 **strict boolean 자체 판독** — 부재/손상(JSON파싱실패)/비-boolean/판독불가 → **false(fail-closed)** → **`403 edit-disabled`**.
-- [ ] `POST /api/settings/definition-edit` body `{ enabled: boolean }`(Zod `z.boolean()` strict, 그 외 400): **F3.7 원자 RMW**(뮤텍스·`projectRoot`·`projectsHome`·`evals` 등 타 필드 보존 — clobber 금지).
-- [ ] **필드 독립:** projectRoot 손상/부팅검증 실패가 `definitionEditEnabled`를 초기화하지 않음. 재시작 지속(명시 저장된 true만). `mutationEnabled` 전면 API는 불변 비활성.
-- [ ] PUT/rollback(mutating)은 `security.ts` onRequest 게이트 자동 적용(Host allowlist 73행·**Origin 검증** 75행·session-token 77행). 쿼리토큰 금지(I5). **신규 라우트가 `/api/` 프리픽스 하위임을 확인**(게이트 통과 조건).
+- [x] `definitionEditEnabled`(기본 off·fail-closed) = F3.7 공유 config 필드(**신규 config 필드 — F3.7 공유**). PUT/rollback 진입 시 config에서 **strict boolean 자체 판독** — 부재/손상(JSON파싱실패)/비-boolean/판독불가 → **false(fail-closed)** → **`403 edit-disabled`**.
+- [x] `POST /api/settings/definition-edit` body `{ enabled: boolean }`(Zod `z.boolean()` strict, 그 외 400): **F3.7 원자 RMW**(뮤텍스·`projectRoot`·`projectsHome`·`evals` 등 타 필드 보존 — clobber 금지).
+- [x] **필드 독립:** projectRoot 손상/부팅검증 실패가 `definitionEditEnabled`를 초기화하지 않음. 재시작 지속(명시 저장된 true만). `mutationEnabled` 전면 API는 불변 비활성.
+- [x] PUT/rollback(mutating)은 `security.ts` onRequest 게이트 자동 적용(Host allowlist 73행·**Origin 검증** 75행·session-token 77행). 쿼리토큰 금지(I5). **신규 라우트가 `/api/` 프리픽스 하위임을 확인**(게이트 통과 조건).
 
 **A-8. 편집/실행 분리 (DW9 · A79)**
-- [ ] 저장은 정의 파일 기록만 — 실행 트리거 **안 함**(F2/New Run 경유). 저장 응답에 Codex 피어 drift 경고 플래그 포함.
+- [x] 저장은 정의 파일 기록만 — 실행 트리거 **안 함**(F2/New Run 경유). 저장 응답에 Codex 피어 drift 경고 플래그 포함.
 
 **A-9. evalProposal 필드 (DW11 · 이번엔 설계·스키마·fail-closed만 · M13 의존)**
-- [ ] PUT body Zod에 `evalProposal?: { nonce: string, envelope: ... }` 필드 **정의만**. **부재 = 일반 편집**(DW1~DW7 경로, M12에서 완전 동작).
-- [ ] **존재 = F8 제안 적용 경로** → M12에서는 crypto 미구현이므로 **fail-closed 거부**(예 `409 proposal-not-available` / `501` 유형). **일반 편집으로 무음 통과 절대 금지**(통합-2 F8→F7 crypto 우회 갭 차단 — envelope 없는/미검증 제안 적용 불가). 실집행(nonce 소비·envelope HMAC·config-hash·A106 재평가·payload 일치)은 **M13 F8 결속**. → §열린 질문 #2.
+- [x] PUT body Zod에 `evalProposal?: { nonce: string, envelope: ... }` 필드 **정의만**. **부재 = 일반 편집**(DW1~DW7 경로, M12에서 완전 동작).
+- [x] **존재 = F8 제안 적용 경로** → M12에서는 crypto 미구현이므로 **fail-closed 거부**(예 `409 proposal-not-available` / `501` 유형). **일반 편집으로 무음 통과 절대 금지**(통합-2 F8→F7 crypto 우회 갭 차단 — envelope 없는/미검증 제안 적용 불가). 실집행(nonce 소비·envelope HMAC·config-hash·A106 재평가·payload 일치)은 **M13 F8 결속**. → §열린 질문 #2.
 
 **A-10. 정의 파서 게이트 CI (F7.8 · A75 · [V8·MED] AS6 결과로 성격 확정)**
-- [ ] `test/fixtures/definitions/` 코퍼스: (i) 정상(옵션필드 다수·본문 `---`·유니코드) (ii) 폴리글롯/멀티도큐/앵커/중복키(reject 기대) (iii) 경계(본문 `---`·코드펜스·CRLF). 각 케이스 accept/reject 라벨.
-- [ ] `npm run test:def-differential` 스크립트(package.json에 신규 — 현재 없음) + 3-OS 매트릭스. **리더 부재 CI는 skip 아닌 fail**(게이트 자체는 필수).
-- [ ] **[V8] 게이트 성격은 AS6 선검증(§선검증 #1)이 확정 — 두 분기:**
-  - [ ] **(분기 A) CLI 리더 진입점 실재 시:** 리더 버전 핀(`--version` 기록) + 비교 (A) 편집기 파서 vs (B) 실 런타임 리더 파싱 결과를 정규화 JSON(키 정렬·스칼라 타입 고정·frontmatter 필드만)으로 직렬화 → accept 코퍼스 전건 A≡B·reject 코퍼스는 편집기 400. 1건 divergence면 게이트 fail. **이 분기에서만 "런타임 리더 등가" 성격.**
-  - [ ] **(분기 B·예상 위험) CLI 리더 진입점 부재 시:** A75/DoD/게이트 명칭을 **"편집기 파서 라운드트립 idempotence 게이트"로 정직 격하** — 재직렬화본을 다시 파싱해도 동일 canonical JSON임만 증명(accept 코퍼스 idempotent·reject 코퍼스 400). **"CLI reader equivalence"·"UI≡CLI 등가" 표현 제거**(A≡B가 같은 파서 2회 실행이면 tautological — 아무것도 증명 못 함). 이 격하는 **residual risk로 명시**(편집기≠런타임 리더 divergence 가능성은 미해소 잔여 위험으로 문서화·오케스트레이터 보고) 후 진행. **권장 게이트를 무조건 "중대 full CLI 등가"로 표기하지 않는다.**
+- [x] `test/fixtures/definitions/` 코퍼스: (i) 정상(옵션필드 다수·본문 `---`·유니코드) (ii) 폴리글롯/멀티도큐/앵커/중복키(reject 기대) (iii) 경계(본문 `---`·코드펜스·CRLF). 각 케이스 accept/reject 라벨.
+- [x] `npm run test:def-differential` 스크립트(package.json에 신규 — 현재 없음) + 3-OS 매트릭스. **리더 부재 CI는 skip 아닌 fail**(게이트 자체는 필수).
+- [x] **[V8] 게이트 성격은 AS6 선검증(§선검증 #1)이 확정 — 두 분기:**
+  - [x] **(분기 A) CLI 리더 진입점 실재 시:** 리더 버전 핀(`--version` 기록) + 비교 (A) 편집기 파서 vs (B) 실 런타임 리더 파싱 결과를 정규화 JSON(키 정렬·스칼라 타입 고정·frontmatter 필드만)으로 직렬화 → accept 코퍼스 전건 A≡B·reject 코퍼스는 편집기 400. 1건 divergence면 게이트 fail. **이 분기에서만 "런타임 리더 등가" 성격.**
+  - [x] **(분기 B·예상 위험) CLI 리더 진입점 부재 시:** A75/DoD/게이트 명칭을 **"편집기 파서 라운드트립 idempotence 게이트"로 정직 격하** — 재직렬화본을 다시 파싱해도 동일 canonical JSON임만 증명(accept 코퍼스 idempotent·reject 코퍼스 400). **"CLI reader equivalence"·"UI≡CLI 등가" 표현 제거**(A≡B가 같은 파서 2회 실행이면 tautological — 아무것도 증명 못 함). 이 격하는 **residual risk로 명시**(편집기≠런타임 리더 divergence 가능성은 미해소 잔여 위험으로 문서화·오케스트레이터 보고) 후 진행. **권장 게이트를 무조건 "중대 full CLI 등가"로 표기하지 않는다.**
 
 **A-11. fail-closed 총괄 (DW10) + I8 경계 회귀**
-- [ ] DW1~DW9 중 하나라도 실패 = 400/403/409, **디스크 무변경(현재본 유지)** 회귀 테스트.
-- [ ] **I8 예외 경계 회귀:** F4/F5/F6 엔드포인트가 **여전히 읽기전용**(쓰기 경로 없음) assert. 편집 대상이 `.claude/agents/*.md`·`.claude/skills/**/SKILL.md` 밖으로 새지 않음 assert(docs/** write 불가).
+- [x] DW1~DW9 중 하나라도 실패 = 400/403/409, **디스크 무변경(현재본 유지)** 회귀 테스트.
+- [x] **I8 예외 경계 회귀:** F4/F5/F6 엔드포인트가 **여전히 읽기전용**(쓰기 경로 없음) assert. 편집 대상이 `.claude/agents/*.md`·`.claude/skills/**/SKILL.md` 밖으로 새지 않음 assert(docs/** write 불가).
 
 ### B. 웹 — Agents/Skills 편집기 (web-builder · `src/web/**`)
 
 **B-1. 편집기 진입 (A80 · A81)**
-- [ ] `screens.tsx` Agents(103행)·Skills(128행) 상세 Card에 **"정의 편집" 버튼** 추가(기존 `split`/`Card` 패턴 따르기·외과적 변경).
-- [ ] `definitionEditEnabled` off → 버튼 `disabled` + **툴팁 "정의 편집 비활성 — Settings에서 켜기"** + Settings 딥링크(A81 — 빈 비활성 금지). codex-only 스킬도 disabled+이유 툴팁.
+- [x] `screens.tsx` Agents(103행)·Skills(128행) 상세 Card에 **"정의 편집" 버튼** 추가(기존 `split`/`Card` 패턴 따르기·외과적 변경).
+- [x] `definitionEditEnabled` off → 버튼 `disabled` + **툴팁 "정의 편집 비활성 — Settings에서 켜기"** + Settings 딥링크(A81 — 빈 비활성 금지). codex-only 스킬도 disabled+이유 툴팁.
 
 **B-2. 조회→편집→diff→검증→저장 (A80 · A86)**
-- [ ] 클릭 → `GET …/definition` → textarea(원문·`MAX_DEF_BYTES`) 또는 구조 폼.
-- [ ] 저장 전 **diff 미리보기**(로드본↔편집본). "저장" → `PUT`(content·baseHash·pathId).
-- [ ] **위험작업 확인 다이얼로그**(A85 — 비가역 파일 변경 명시) → 성공 토스트·`prevHash`·**"실행하려면 New Run/Ask Agent로"**(편집≠실행)·Codex drift 경고. "되돌리기" = `POST …/rollback`.
-- [ ] **미저장 변경 이탈 경고**(navigate-away guard · A86).
+- [x] 클릭 → `GET …/definition` → textarea(원문·`MAX_DEF_BYTES`) 또는 구조 폼.
+- [x] 저장 전 **diff 미리보기**(로드본↔편집본). "저장" → `PUT`(content·baseHash·pathId).
+- [x] **위험작업 확인 다이얼로그**(A85 — 비가역 파일 변경 명시) → 성공 토스트·`prevHash`·**"실행하려면 New Run/Ask Agent로"**(편집≠실행)·Codex drift 경고. "되돌리기" = `POST …/rollback`.
+- [x] **미저장 변경 이탈 경고**(navigate-away guard · A86).
 
 **B-3. 오류 인라인 + 409 편집분 보존 (A80 · A93 · A86)**
-- [ ] `400`(무결성)·`403`(비활성) 인라인 표시.
-- [ ] **`409 stale-write` → 자동 재로드 금지**(A93·UX-R1-#1): 사용자 편집 textarea **보존**한 채 "디스크가 변경됨" 배너 + (a) 디스크본↔편집본 **병합 뷰**(최소 나란히 비교) or (b) 편집분 로컬 백업/클립보드 복사 후 수동 병합. **"덮어쓰기 전 편집분 보존" 보장**(데이터 유실 방지).
+- [x] `400`(무결성)·`403`(비활성) 인라인 표시.
+- [x] **`409 stale-write` → 자동 재로드 금지**(A93·UX-R1-#1): 사용자 편집 textarea **보존**한 채 "디스크가 변경됨" 배너 + (a) 디스크본↔편집본 **병합 뷰**(최소 나란히 비교) or (b) 편집분 로컬 백업/클립보드 복사 후 수동 병합. **"덮어쓰기 전 편집분 보존" 보장**(데이터 유실 방지).
 
 **B-4. 공통 UI 회귀 (A83·A92 — [V6·MED])**
-- [ ] **A83 패널별 독립 로딩·부분실패 격리:** 편집기의 정의 로드·diff 미리보기·저장 결과·rollback이 각각 독립 로딩/에러로 처리되고, 한 영역(예 diff 렌더 실패) 실패가 편집 textarea·저장 동선을 무너뜨리지 않는다.
-- [ ] **A92 접근성(WCAG AA):** 편집 진입 버튼·textarea·diff 뷰·확인 다이얼로그·409 병합 뷰·인라인 에러가 **키보드 조작 가능**·포커스 링 가시·다이얼로그 포커스 트랩·ESC·색 대비 AA·에러/비활성/drift 상태를 **색상 단독 의존 없이** 텍스트 병기. 비활성 버튼 이유 툴팁은 스크린리더 접근 가능(A81 연계).
+- [x] **A83 패널별 독립 로딩·부분실패 격리:** 편집기의 정의 로드·diff 미리보기·저장 결과·rollback이 각각 독립 로딩/에러로 처리되고, 한 영역(예 diff 렌더 실패) 실패가 편집 textarea·저장 동선을 무너뜨리지 않는다.
+- [x] **A92 접근성(WCAG AA):** 편집 진입 버튼·textarea·diff 뷰·확인 다이얼로그·409 병합 뷰·인라인 에러가 **키보드 조작 가능**·포커스 링 가시·다이얼로그 포커스 트랩·ESC·색 대비 AA·에러/비활성/drift 상태를 **색상 단독 의존 없이** 텍스트 병기. 비활성 버튼 이유 툴팁은 스크린리더 접근 가능(A81 연계).
 
 ---
 

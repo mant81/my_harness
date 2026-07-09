@@ -196,6 +196,88 @@ export async function cancelActiveRuns(): Promise<{ attempted: number; cancelled
   return { attempted: ids.length, cancelled };
 }
 
+// ── F7 정의 편집기(M12·첫 mutating·중대) ──
+// 서버 확정 계약(server-builder 완료·이대로 소비):
+//   GET  /api/{agents|skills}/:name/definition → 200 { name,sourcePath,pathId,content,baseHash,mtimeMs,editable }
+//        · 400 invalid-name|path-unsafe · 404 not-found · 409 ambiguous-definition|codex-only-v0.7
+//   PUT  …/definition (mutating·Host/Origin/token 게이트) body { content,baseHash,pathId,evalProposal? }
+//        → 200 { ok,prevHash,newHash,pathId,sourcePath,codexDriftWarning }
+//        · 403 edit-disabled · 400 bad-input|too-large|integrity(+detail)|backup-failed|path-unsafe
+//        · 404 not-found · 409 stale-write(+currentHash)|path-id-mismatch|proposal-not-available|ambiguous|codex-only
+//   POST …/definition/rollback body { expectedCurrentHash,backupHash }
+//        → 200 { ok,prevHash,restoredHash,pathId } · 409 stale-rollback(+currentHash)|backup-hash-mismatch
+//        · 404 no-backup · 400 integrity
+//   POST /api/settings/definition-edit body { enabled:boolean } → 200 { ok,definitionEditEnabled }
+import type { DefKind, DefinitionDoc, PutDefResult, RollbackResult } from "./defedit.js";
+export type { DefKind, DefinitionDoc, PutDefResult, RollbackResult } from "./defedit.js";
+
+// 400/403/409 거부를 구조 보존 승격(submitRun/ProjectRootError 동형). detail·currentHash 보존:
+//   integrity detail(세부코드)·stale-write currentHash(A93 병합 뷰용) 을 UI 로 전달(조용한 드롭 금지).
+export class DefEditError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly detail?: unknown,
+    public readonly currentHash?: string,
+  ) {
+    super(code);
+    this.name = "DefEditError";
+  }
+}
+
+const defSeg = (kind: DefKind) => (kind === "agent" ? "agents" : "skills");
+
+async function defReject(r: Response): Promise<never> {
+  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown; currentHash?: unknown }));
+  const currentHash = typeof d.currentHash === "string" ? d.currentHash : undefined;
+  throw new DefEditError(r.status, String(d.error ?? r.status), d.detail, currentHash);
+}
+
+// GET 정의(이름→서버 정규경로 재조회). 클라 경로 페이로드 금지 — :name(논리 이름)만 전달.
+export async function getDefinition(kind: DefKind, name: string): Promise<DefinitionDoc> {
+  const r = await fetch(`/api/${defSeg(kind)}/${encodeURIComponent(name)}/definition`, { headers: authHeaders() });
+  if (!r.ok) return defReject(r);
+  return r.json() as Promise<DefinitionDoc>;
+}
+
+// PUT 저장(content·baseHash·pathId). 낙관적 동시성·무결성·백업은 서버 권위. 409 stale-write → currentHash 보존.
+export async function putDefinition(
+  kind: DefKind, name: string, body: { content: string; baseHash: string; pathId: string },
+): Promise<PutDefResult> {
+  const r = await fetch(`/api/${defSeg(kind)}/${encodeURIComponent(name)}/definition`, {
+    method: "PUT",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return defReject(r);
+  return r.json() as Promise<PutDefResult>;
+}
+
+// POST 되돌리기(expectedCurrentHash·backupHash). 저장 직후 직전본으로 원자 복원.
+export async function rollbackDefinition(
+  kind: DefKind, name: string, body: { expectedCurrentHash: string; backupHash: string },
+): Promise<RollbackResult> {
+  const r = await fetch(`/api/${defSeg(kind)}/${encodeURIComponent(name)}/definition/rollback`, {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return defReject(r);
+  return r.json() as Promise<RollbackResult>;
+}
+
+// 게이트 토글(mutating·config RMW·타 필드 보존은 서버). off 기본·고위험 인지 후 활성(A85).
+export async function setDefinitionEdit(enabled: boolean): Promise<{ ok: true; definitionEditEnabled: boolean }> {
+  const r = await fetch("/api/settings/definition-edit", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify({ enabled }),
+  });
+  if (!r.ok) return defReject(r);
+  return r.json() as Promise<{ ok: true; definitionEditEnabled: boolean }>;
+}
+
 // ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
 // healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
 // 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).

@@ -3,7 +3,11 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { detectRuntimes } from "../adapters/runtime.js";
-import { harnessInventory, readAgents, readSkills, findAgent, agentFingerprint } from "../adapters/harness.js";
+import { harnessInventory, readAgents, readSkills, findAgent, agentFingerprint, resolveEditableAgent, resolveEditableSkill, type DefResolution } from "../adapters/harness.js";
+import {
+  canonicalizeDefinition, safeDefPath, readDefSafe, sha256, writeBackup, readBackup,
+  writeDefSafe, withDefLock, MAX_DEF_BYTES, type DefKind,
+} from "../adapters/defedit.js";
 import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapters/runs.js";
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
@@ -18,12 +22,26 @@ import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
 import { cancelRun } from "../supervisor/reconcile.js";
 import { join as pjoin } from "node:path";
-import { projectsHomeFromEnv, updateConfig } from "../lib/config.js";
+import { projectsHomeFromEnv, updateConfig, loadConfigFromDisk } from "../lib/config.js";
 import { validateProjectRoot, revalidateForPersist } from "../lib/projectroot.js";
 
 // PV3: activeRunsWarning 산출. listRuns 재사용(신규 스캐너 금지) → status.json running 카운트.
 //   재시작 시 고아될 라이브 supervised run 판정(owner 레지스트리 cross-restart 는 미사용 — 열린질문 4).
 const ACTIVE_RUN_STATES = new Set<string>(["running"]);
+
+// F7 PUT/rollback 요청 스키마(Zod 신뢰경계). 해시는 sha256 hex 64자 고정. content 는 char 상한(byte 상한은
+//   핸들러에서 재검증 — UTF-8 byte ≥ char). evalProposal 은 파싱만(존재 시 fail-closed 거부·DW11).
+const EvalProposalSchema = z.object({ nonce: z.string(), envelope: z.unknown() }).passthrough();
+const PutDefBody = z.object({
+  content: z.string().max(1048576), // 느슨한 char 상한(Fastify bodyLimit 정합) — byte 상한(MAX_DEF_BYTES)은 핸들러가 권위 검증
+  baseHash: z.string().length(64),
+  pathId: z.string().length(64),
+  evalProposal: EvalProposalSchema.optional(),
+}).strict();
+const RollbackBody = z.object({
+  expectedCurrentHash: z.string().length(64),
+  backupHash: z.string().length(64),
+}).strict();
 async function countActiveRuns(projectRoot: string): Promise<number> {
   const { runs } = await listRuns(projectRoot);
   return runs.filter((r) => {
@@ -71,6 +89,128 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
     if (!okName(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
     const found = (await readSkills(projectRoot)).find((s) => s.name === req.params.name);
     return found ?? reply.code(404).send({ error: "not-found" });
+  });
+
+  // ── F7(M12) 정의 편집기 — DW1~DW11. I8 읽기전용 원칙의 유일 예외(`.claude` 정의 편집만·게이트 스코프) ──
+  // mutating(PUT/rollback/설정)은 security.ts onRequest 훅이 Host/Origin/token 자동 게이트(추가 배선 불요·/api 하위).
+  // DW1 매 요청 strict boolean 판독 — 부재/손상/판독불가 config → false(fail-closed) → 403.
+  async function isEditEnabled(): Promise<boolean> {
+    try { return (await loadConfigFromDisk()).definitionEditEnabled === true; }
+    catch { return false; } // unsupported-schema 등 throw → fail-closed
+  }
+  const editName = (n: string) => n.length > 0 && n.length <= 200; // :name 논리 이름(경로 아님)
+  const resolveDef = (kind: DefKind, name: string): Promise<DefResolution> =>
+    kind === "agent" ? resolveEditableAgent(projectRoot, name) : resolveEditableSkill(projectRoot, name);
+  // DefResolution 오류 → HTTP 코드. not-found=404·ambiguous/codex-only=409(비결정 해소·범위밖 명시).
+  const resErr = (e: Exclude<DefResolution, { ok: true }>["error"]) =>
+    e === "not-found" ? 404 : 409;
+
+  // GET 정의: 이름→정규 sourcePath 서버 재조회(DW2) → 안전 read(DW3) → content+baseHash+pathId+mtime+editable.
+  function registerDefRoutes(kind: DefKind) {
+    const seg = kind === "agent" ? "agents" : "skills";
+    app.get<{ Params: { name: string } }>(`/api/${seg}/:name/definition`, async (req, reply) => {
+      if (!editName(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
+      const r = await resolveDef(kind, req.params.name);
+      if (!r.ok) return reply.code(resErr(r.error)).send({ error: r.error });
+      const abs = await safeDefPath(projectRoot, r.sourcePath, kind);
+      if (!abs) return reply.code(400).send({ error: "path-unsafe" });
+      const f = await readDefSafe(abs);
+      if (!f) return reply.code(404).send({ error: "not-found" });
+      return {
+        name: req.params.name, sourcePath: r.sourcePath, pathId: sha256(r.sourcePath),
+        content: f.content, baseHash: sha256(f.content), mtimeMs: f.mtimeMs,
+        editable: await isEditEnabled(),
+      };
+    });
+
+    // PUT 저장: 게이트(DW1)·evalProposal fail-closed(DW11)·pathId 일치·낙관적 동시성(DW6)·무결성(DW5)·
+    //   백업(DW7)·원자 쓰기(DW4). 저장은 파일 기록만·실행 트리거 안 함(DW9).
+    app.put<{ Params: { name: string } }>(`/api/${seg}/:name/definition`, async (req, reply) => {
+      if (!(await isEditEnabled())) return reply.code(403).send({ error: "edit-disabled" });
+      if (!editName(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
+      const parsed = PutDefBody.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+      // DW11: evalProposal 존재 = F8 제안 적용 경로(crypto 미구현·M13 의존) → fail-closed 거부.
+      //   무음 일반편집 통과 절대 금지(통합-2 F8→F7 우회 차단). 부재 = 일반 편집(DW1~DW7).
+      if (parsed.data.evalProposal !== undefined) return reply.code(409).send({ error: "proposal-not-available" });
+      const { content, baseHash, pathId } = parsed.data;
+      if (Buffer.byteLength(content, "utf8") > MAX_DEF_BYTES) return reply.code(400).send({ error: "too-large" });
+
+      const r = await resolveDef(kind, req.params.name);
+      if (!r.ok) return reply.code(resErr(r.error)).send({ error: r.error });
+      if (sha256(r.sourcePath) !== pathId) return reply.code(409).send({ error: "path-id-mismatch" }); // GET↔PUT 다른 정의 타격 차단
+      const abs = await safeDefPath(projectRoot, r.sourcePath, kind);
+      if (!abs) return reply.code(400).send({ error: "path-unsafe" });
+      // MED(codex·lost-update): read-hash-backup-write 를 정의별 뮤텍스로 단일 임계구역화 —
+      //   같은 baseHash 동시 두 PUT 중 하나만 성공, 다른 하나는 재-read 로 stale(409).
+      return withDefLock(r.sourcePath, async () => {
+        const cur = await readDefSafe(abs);
+        if (!cur) return reply.code(404).send({ error: "not-found" });
+        const prevHash = sha256(cur.content);
+        if (prevHash !== baseHash) return reply.code(409).send({ error: "stale-write", currentHash: prevHash });
+        const canon = canonicalizeDefinition(content, kind, req.params.name);
+        // agy#1(HIGH): canonical 출력이 read cap 초과면 write 前 400 too-large(디스크 미기록·은폐 불가).
+        if (!canon.ok) {
+          if (canon.error === "too-large") return reply.code(400).send({ error: "too-large" });
+          return reply.code(400).send({ error: "integrity", detail: canon.error });
+        }
+        // 백업(직전 1개·opaque 파일명) 성공 후 경화 원자 교체. 백업 실패 시 저장 중단(되돌리기 불가 상태 방지).
+        try { await writeBackup(r.sourcePath, cur.content); }
+        catch { return reply.code(400).send({ error: "backup-failed" }); }
+        // DW3/DW4 경화쓰기(부모 체인 재검증·TOCTOU 스왑 감지). 스왑 등 위반 = fail-closed 400.
+        try { await writeDefSafe(projectRoot, r.sourcePath, kind, canon.canonical); }
+        catch { return reply.code(400).send({ error: "path-unsafe" }); }
+        return {
+          ok: true, prevHash, newHash: sha256(canon.canonical), pathId, sourcePath: r.sourcePath,
+          codexDriftWarning: true, // DW8/F7.7: Codex 듀얼(.codex/.agents) 피어는 v0.7 비대상 — drift 경고만.
+        };
+      });
+    });
+
+    // POST rollback: 게이트 → 현재 해시==expectedCurrentHash(DW6) → 백업 해시==backupHash(변조 거부) →
+    //   백업 DW5 재검증(손상본 복원 차단) → DW3 재실행 → 원자 복원.
+    app.post<{ Params: { name: string } }>(`/api/${seg}/:name/definition/rollback`, async (req, reply) => {
+      if (!(await isEditEnabled())) return reply.code(403).send({ error: "edit-disabled" });
+      if (!editName(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
+      const parsed = RollbackBody.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+      const { expectedCurrentHash, backupHash } = parsed.data;
+      const r = await resolveDef(kind, req.params.name);
+      if (!r.ok) return reply.code(resErr(r.error)).send({ error: r.error });
+      const abs = await safeDefPath(projectRoot, r.sourcePath, kind);
+      if (!abs) return reply.code(400).send({ error: "path-unsafe" });
+      // 정의별 뮤텍스(PUT 과 동일 키) — rollback 의 read-hash-check-write 도 단일 임계구역.
+      return withDefLock(r.sourcePath, async () => {
+        const cur = await readDefSafe(abs);
+        if (!cur) return reply.code(404).send({ error: "not-found" });
+        const curHash = sha256(cur.content);
+        if (curHash !== expectedCurrentHash) return reply.code(409).send({ error: "stale-rollback", currentHash: curHash });
+        const backup = await readBackup(r.sourcePath);
+        if (backup === null) return reply.code(404).send({ error: "no-backup" });
+        if (sha256(backup) !== backupHash) return reply.code(409).send({ error: "backup-hash-mismatch" }); // 손상/변조 백업 거부
+        const canon = canonicalizeDefinition(backup, kind, req.params.name); // 손상본 복원 차단(DW5 재검증)
+        // agy#1(HIGH): 복원본 canonical 도 read cap 이내여야 write(은폐 유발 복원 차단).
+        if (!canon.ok) {
+          if (canon.error === "too-large") return reply.code(400).send({ error: "too-large" });
+          return reply.code(400).send({ error: "integrity", detail: canon.error });
+        }
+        // DW3/DW4 경화쓰기(부모 체인 재검증·TOCTOU 스왑 감지).
+        try { await writeDefSafe(projectRoot, r.sourcePath, kind, canon.canonical); }
+        catch { return reply.code(400).send({ error: "path-unsafe" }); }
+        return { ok: true, prevHash: curHash, restoredHash: sha256(canon.canonical), pathId: sha256(r.sourcePath) };
+      });
+    });
+  }
+  registerDefRoutes("agent");
+  registerDefRoutes("skill");
+
+  // DW1/DW8: 게이트 노브 토글(mutating·F3.7 원자 RMW·타 필드 보존). Zod strict boolean(그 외 400).
+  const DefEditBody = z.object({ enabled: z.boolean() }).strict();
+  app.post("/api/settings/definition-edit", async (req, reply) => {
+    const parsed = DefEditBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const next = await updateConfig({ definitionEditEnabled: parsed.data.enabled }); // projectRoot/projectsHome/evals 보존
+    return { ok: true, definitionEditEnabled: next.definitionEditEnabled };
   });
 
   // 무인자(raw 쿼리 부재) → 기존 listRuns({runs} 계약 불변). 인자 → RunsQuery 검증 후 queryRuns.

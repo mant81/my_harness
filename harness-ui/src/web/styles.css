@@ -143,3 +143,43 @@ details.tier-b[open] > summary { margin-bottom:8px; }
 .conn-box .primary { background:var(--accent); color:#0b0d12; border:none; border-radius:6px; padding:8px 16px; font-weight:600; cursor:pointer; margin-top:12px; }
 @keyframes conn-rot { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion:reduce) { .conn-spin { animation:none; } }
+
+/* F7 M12 — 정의 편집기(A80·A81·A85·A86·A93). 순수 텍스트 diff/merge(색 비의존: +/− 마크 병기). */
+.detail-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+.edit-disabled-wrap { display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.edit-reason { font-size:12px; }
+.edit-btn { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px 16px; font:inherit; cursor:pointer; }
+.edit-btn.primary { background:var(--accent); color:#0b0d12; border:none; font-weight:600; }
+.edit-btn:disabled { opacity:.5; cursor:not-allowed; }
+
+.def-textarea-label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); margin-top:10px; }
+.def-textarea { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:8px; font-family:ui-monospace,monospace; font-size:12px; line-height:1.5; width:100%; box-sizing:border-box; resize:vertical; }
+.def-textarea[readonly] { opacity:.75; }
+.def-editor-toolbar { display:flex; gap:12px; align-items:center; margin-top:10px; }
+.def-editor-toolbar .primary { margin-left:auto; }
+
+.def-diff { margin-top:10px; }
+.def-diff-body { font-family:ui-monospace,monospace; font-size:12px; line-height:1.5; max-height:360px; overflow:auto; padding:8px; }
+.dl { display:flex; gap:8px; }
+.dl-mark { width:1ch; flex:none; user-select:none; font-weight:700; }
+.dl-text { white-space:pre-wrap; word-break:break-word; }
+.dl-add { background:rgba(63,185,80,.12); color:var(--ok); }
+.dl-del { background:rgba(248,81,73,.12); color:var(--err); }
+
+.def-conflict { margin-top:12px; }
+.def-conflict-actions { display:flex; gap:10px; margin:8px 0; flex-wrap:wrap; }
+.def-conflict-actions button { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+.def-merge { margin-top:10px; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+.def-merge-head { display:grid; grid-template-columns:1fr 1fr; background:var(--bg); font-size:12px; color:var(--muted); }
+.def-merge-head span { padding:6px 8px; border-bottom:1px solid var(--line); }
+.def-merge-head span:first-child { border-right:1px solid var(--line); }
+.def-merge-body { max-height:360px; overflow:auto; font-family:ui-monospace,monospace; font-size:12px; line-height:1.5; }
+.mr { display:grid; grid-template-columns:1fr 1fr; }
+.mr-cell { padding:1px 8px; white-space:pre-wrap; word-break:break-word; }
+.mr-left { border-right:1px solid var(--line); }
+.mr-del .mr-left { background:rgba(248,81,73,.12); }
+.mr-add .mr-right { background:rgba(63,185,80,.12); }
+
+.def-saved { margin-top:12px; display:flex; flex-direction:column; gap:6px; }
+.def-saved p { margin:0; }
+.def-saved button { align-self:flex-start; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }

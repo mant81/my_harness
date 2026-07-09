@@ -10,9 +10,15 @@ import {
   apiPost, fetchArtifact, downloadDoc, downloadArtifact,
   encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
   postProjectRoot, ProjectRootError, cancelActiveRuns,
+  getDefinition, putDefinition, rollbackDefinition, setDefinitionEdit, DefEditError,
   type DocsNode, type DocsTree, type DocPreview,
   type SettingsInfo, type ProjectRootPreview,
+  type DefKind, type DefinitionDoc, type PutDefResult,
 } from "./api.js";
+import {
+  defEditErrorText, diffLines, diffStats, hasChanges, isDiffCoarse, sideRows,
+  skillNeedsName, skillHasClaudePath, isDirty, rollbackBodyFromSave,
+} from "./defedit.js";
 import { projectRootErrorText, canSave, requiresOrphanChoice, type OrphanChoice } from "./settings.js";
 import {
   type RunTemplate, type RunSubmitResult,
@@ -240,8 +246,11 @@ export function Build() {
 // ── 3. Agents (A3 · F2 M10 프리필 New Run) ──
 export function Agents() {
   const st = useApi<{ agents: Array<{ name: string; runtime: string; sourcePath: string; role: string; skills: string[] }> }>("/api/agents");
+  const set = useApi<SettingsInfo>("/api/settings"); // F7: definitionEditEnabled(편집 버튼 게이트·A81)
   const [sel, setSel] = useState<string | null>(null);
   const [runFor, setRunFor] = useState<string | null>(null); // F2: New Run 프리필 폼 대상 에이전트
+  const [editFor, setEditFor] = useState<string | null>(null); // F7: 정의 편집 대상 에이전트
+  const gateOn = set.data?.definitionEditEnabled === true;
   return (
     <div className="screen">
       <h2>Agents</h2>
@@ -255,14 +264,24 @@ export function Agents() {
               <p className="muted">{a.sourcePath} · {a.runtime}</p>
               <p>{a.role || "(설명 없음)"}</p>
               {a.skills.length > 0 && <p>스킬: {a.skills.join(", ")}</p>}
-              {/* F2 W1/A67: 프리필 New Run 진입점(라벨 RF2 정합) */}
-              <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
+              <div className="detail-actions">
+                {/* F2 W1/A67: 프리필 New Run 진입점(라벨 RF2 정합) */}
+                <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
+                {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex → 비활성 + 이유 툴팁 + Settings 딥링크) */}
+                <EditButton
+                  reason={!gateOn ? "정의 편집이 비활성입니다" : a.runtime !== "claude" ? "codex 에이전트 정의 편집은 v0.7 비대상입니다" : null}
+                  showSettingsLink={!gateOn}
+                  onEdit={() => setEditFor(a.name)}
+                />
+              </div>
             </Card>
           ) : null; })()}
         </div>
       )}</Async>
       {/* F2 W1/A83: 프리필 폼은 상세 카드와 독립 카드로 렌더 — run-template 로드 실패가 Agents 화면 전체를 무너뜨리지 않음 */}
       {runFor && <AgentRunForm key={runFor} name={runFor} onClose={() => setRunFor(null)} />}
+      {/* F7 A80/A83: 편집기는 독립 카드(3-state·로드/저장/rollback 실패가 화면 전체 미붕괴) */}
+      {editFor && <DefinitionEditor key={"agent:" + editFor} kind="agent" name={editFor} onClose={() => setEditFor(null)} />}
       {/* F6 W3: usage 섹션은 자체 metrics/agents 페치로 독립 로딩(W9/A83) */}
       <AgentsUsage />
     </div>
@@ -395,7 +414,10 @@ function AgentRunFormBody({ template }: { template: RunTemplate }) {
 // ── 4. Skills (A4·A43 triggers) ──
 export function Skills() {
   const st = useApi<{ skills: Array<{ name: string; description: string; triggers: string; references: string[]; runtimePaths: string[] }> }>("/api/skills");
+  const set = useApi<SettingsInfo>("/api/settings"); // F7: definitionEditEnabled(편집 버튼 게이트·A81)
   const [sel, setSel] = useState<string | null>(null);
+  const [editFor, setEditFor] = useState<string | null>(null); // F7: 정의 편집 대상 스킬
+  const gateOn = set.data?.definitionEditEnabled === true;
   return (
     <div className="screen">
       <h2>Skills</h2>
@@ -409,13 +431,258 @@ export function Skills() {
               <p className="muted">{s.runtimePaths.join(", ")}</p>
               <p>{s.description || "(설명 없음)"}</p>
               {s.references.length > 0 && <p>참조: {s.references.join(", ")}</p>}
+              <div className="detail-actions">
+                {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex-only → 비활성 + 이유 툴팁 + Settings 딥링크) */}
+                <EditButton
+                  reason={!gateOn ? "정의 편집이 비활성입니다" : !skillHasClaudePath(s.runtimePaths) ? "codex 전용 스킬 정의 편집은 v0.7 비대상입니다" : null}
+                  showSettingsLink={!gateOn}
+                  onEdit={() => setEditFor(s.name)}
+                />
+              </div>
             </Card>
           ) : null; })()}
         </div>
       )}</Async>
+      {/* F7 A80/A83: 편집기는 독립 카드(3-state) */}
+      {editFor && <DefinitionEditor key={"skill:" + editFor} kind="skill" name={editFor} onClose={() => setEditFor(null)} />}
       {/* F6 W4: usage 섹션은 자체 metrics/skills 페치로 독립 로딩(W9/A83) */}
       <SkillsUsage />
     </div>
+  );
+}
+
+// ── F7 정의 편집기 (M12 · A80·A81·A85·A86·A93 · 첫 mutating·중대) ──
+// XSS: textarea·diff·merge 는 전부 React escape(순수 텍스트) — dangerouslySetInnerHTML 금지(마크다운 렌더 아님).
+
+// A81: 편집 진입 버튼. reason!=null → 비활성 + 이유 툴팁(색 비의존·텍스트 병기·빈 비활성 금지) + Settings 딥링크.
+function EditButton({ reason, showSettingsLink, onEdit }: { reason: string | null; showSettingsLink: boolean; onEdit: () => void }) {
+  if (!reason) return <button className="primary edit-btn" onClick={onEdit}>✎ 정의 편집</button>;
+  return (
+    <span className="edit-disabled-wrap">
+      <button className="edit-btn" disabled aria-disabled="true" title={reason}>✎ 정의 편집</button>
+      <span className="muted edit-reason" role="note">🔒 {reason}
+        {showSettingsLink && <> · <a className="link" href="#/settings">Settings에서 켜기 →</a></>}
+      </span>
+    </span>
+  );
+}
+
+// 통합 diff 미리보기(로드본→편집본) — +/−/space 마크로 색 비의존(A92). 순수 텍스트 렌더.
+function DiffView({ before, after }: { before: string; after: string }) {
+  if (!hasChanges(before, after)) return <p className="muted" role="status">변경 없음</p>;
+  const ops = diffLines(before, after);
+  const stats = diffStats(ops);
+  return (
+    <div className="def-diff" role="group" aria-label="변경 미리보기(로드본 → 편집본)">
+      <p className="muted">추가 +{stats.added} / 삭제 −{stats.removed} 라인{isDiffCoarse(before, after) && " · 대용량 정의 — 개략 비교(전체 교체)"}</p>
+      <div className="out def-diff-body">
+        {ops.map((o, i) => (
+          <div key={i} className={`dl dl-${o.kind}`}>
+            <span className="dl-mark" aria-hidden="true">{o.kind === "add" ? "+" : o.kind === "del" ? "−" : " "}</span>
+            <span className="dl-text">{o.text === "" ? " " : o.text}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A93 병합 뷰 — 디스크 현재본 ↔ 내 편집분(보존) 나란히 비교. 편집분 유실 방지의 시각적 근거.
+function MergeView({ disk, edited }: { disk: string; edited: string }) {
+  const rows = sideRows(diffLines(disk, edited));
+  return (
+    <div className="def-merge" role="group" aria-label="디스크 현재본과 내 편집분 나란히 비교">
+      <div className="def-merge-head"><span>디스크 현재본</span><span>내 편집분 (보존됨)</span></div>
+      <div className="def-merge-body">
+        {rows.map((r, i) => (
+          <div key={i} className={`mr mr-${r.kind}`}>
+            <span className="mr-cell mr-left">{r.left ?? " "}</span>
+            <span className="mr-cell mr-right">{r.right ?? " "}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// A93 stale-write 충돌 상태(편집분 보존 병합). diskContent=null → 디스크 현재본 재조회 실패 폴백.
+type StaleConflict = { currentHash: string; diskContent: string | null };
+
+function DefinitionEditor({ kind, name, onClose }: { kind: DefKind; name: string; onClose: () => void }) {
+  const [doc, setDoc] = useState<DefinitionDoc | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [edited, setEdited] = useState<string>("");
+  const [baseHash, setBaseHash] = useState<string>(""); // 낙관적 동시성 기준(저장·adopt 시 갱신)
+  const [showDiff, setShowDiff] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<PutDefResult | null>(null);
+  const [rolledBack, setRolledBack] = useState(false);
+  const [rbBusy, setRbBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null); // 400/403/409 인라인(A80)
+  const [conflict, setConflict] = useState<StaleConflict | null>(null); // A93
+  const [copied, setCopied] = useState(false);
+
+  // 정의 로드(이름→서버 정규경로 재조회). A83: 편집기 카드 안에서만 3-state.
+  useEffect(() => {
+    let live = true;
+    setDoc(null); setLoadErr(null); setSaveResult(null); setConflict(null); setErr(null);
+    getDefinition(kind, name)
+      .then((d) => { if (live) { setDoc(d); setEdited(d.content); setBaseHash(d.baseHash); } })
+      .catch((e) => { if (live) setLoadErr(e instanceof DefEditError ? defEditErrorText(e.code, e.status, e.detail) : String(e)); });
+    return () => { live = false; };
+  }, [kind, name]);
+
+  const dirty = doc != null && isDirty(doc.content, edited);
+
+  // A86: 미저장 이탈 경고(브라우저 unload). 앱 내 닫기는 confirm() 게이트(아래 doClose).
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+
+  const doClose = () => {
+    if (dirty && !window.confirm("저장하지 않은 편집 내용이 있습니다. 편집기를 닫을까요?")) return;
+    onClose();
+  };
+
+  const editable = doc?.editable === true;
+
+  // 저장 실행(확인 다이얼로그에서 호출). 성공 → 재조회로 canonical 반영·rollback 준비. 실패 → 인라인/A93.
+  const doSave = async () => {
+    if (!doc) return;
+    setSaving(true); setErr(null);
+    try {
+      const res = await putDefinition(kind, name, { content: edited, baseHash, pathId: doc.pathId });
+      setConfirmOpen(false); setConflict(null); setRolledBack(false);
+      setSaveResult(res); setBaseHash(res.newHash);
+      // canonical 재직렬화본을 재조회해 diff 기준 갱신(실패해도 저장 성공 배너 유지·A83).
+      try { const d = await getDefinition(kind, name); setDoc(d); setEdited(d.content); setBaseHash(d.baseHash); } catch { /* 재조회 실패 격리 */ }
+    } catch (e) {
+      setConfirmOpen(false);
+      if (e instanceof DefEditError && e.status === 409 && e.code === "stale-write") {
+        // A93: 자동 재로드 금지 — 편집분(edited) 보존한 채 디스크 현재본 조회해 병합 뷰.
+        const ch = e.currentHash ?? "";
+        setErr(defEditErrorText(e.code, e.status));
+        getDefinition(kind, name)
+          .then((d) => setConflict({ currentHash: e.currentHash ?? d.baseHash, diskContent: d.content }))
+          .catch(() => setConflict({ currentHash: ch, diskContent: null }));
+      } else {
+        setErr(e instanceof DefEditError ? defEditErrorText(e.code, e.status, e.detail) : String(e));
+      }
+    } finally { setSaving(false); }
+  };
+
+  // A93: 디스크 최신본 기준으로 재저장 준비 — baseHash 를 디스크 현재 해시로 채택(편집분은 그대로 유지·의도적 덮어쓰기).
+  const adoptDiskBase = () => {
+    if (!conflict) return;
+    setBaseHash(conflict.currentHash);
+    setConflict(null); setErr(null);
+  };
+
+  const copyEdited = async () => {
+    try { await navigator.clipboard.writeText(edited); setCopied(true); setTimeout(() => setCopied(false), 2500); }
+    catch { setCopied(false); }
+  };
+
+  // "되돌리기" = POST rollback(expectedCurrentHash=newHash·backupHash=prevHash). 성공 → 재조회 반영.
+  const doRollback = async () => {
+    if (!saveResult) return;
+    setRbBusy(true); setErr(null);
+    try {
+      await rollbackDefinition(kind, name, rollbackBodyFromSave(saveResult));
+      setSaveResult(null); setRolledBack(true);
+      const d = await getDefinition(kind, name); setDoc(d); setEdited(d.content); setBaseHash(d.baseHash);
+    } catch (e) {
+      setErr(e instanceof DefEditError ? defEditErrorText(e.code, e.status, e.detail) : String(e));
+    } finally { setRbBusy(false); }
+  };
+
+  return (
+    <Card title={`정의 편집 · ${name}`}>
+      <button className="link" onClick={doClose}>✕ 닫기</button>
+      {loadErr && <p className="banner err" role="alert">⚠ {loadErr}</p>}
+      {!doc && !loadErr && <p className="muted">불러오는 중…</p>}
+      {doc && (
+        <>
+          <p className="muted"><code className="path">{doc.sourcePath}</code>{dirty && <span className="warn-text"> · 미저장 변경 있음</span>}</p>
+
+          {!editable && (
+            <p className="banner warn" role="note">🔒 정의 편집이 비활성입니다 — 뷰어 전용. <a className="link" href="#/settings">Settings에서 켜기 →</a></p>
+          )}
+
+          {/* name 필수 안내(name 없는 스킬 저장 전 힌트·400 integrity field:name 예방) */}
+          {editable && skillNeedsName(kind, edited) && (
+            <p className="banner warn" role="note">⚠ 이 스킬 정의에 <code>name:</code> 필드가 없습니다 — 저장하려면 frontmatter 에 <code>name: {name}</code> 를 명시하세요.</p>
+          )}
+
+          <label className="def-textarea-label">
+            정의 원문 (frontmatter + 본문)
+            <textarea className="def-textarea" value={edited} onChange={(e) => setEdited(e.target.value)}
+              readOnly={!editable} aria-label="정의 원문 편집" spellCheck={false} rows={20} />
+          </label>
+
+          <div className="def-editor-toolbar">
+            <button className="link" aria-pressed={showDiff} onClick={() => setShowDiff((v) => !v)}>
+              {showDiff ? "변경 미리보기 접기" : "변경 미리보기 (diff)"}
+            </button>
+            {editable && (
+              <button className="primary" disabled={!dirty || saving} onClick={() => { setErr(null); setConfirmOpen(true); }}>
+                저장…
+              </button>
+            )}
+          </div>
+
+          {showDiff && <DiffView before={doc.content} after={edited} />}
+
+          {/* 400/403/409 인라인 에러(조용한 드롭 금지·A80) */}
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+
+          {/* A93 stale-write 편집분 보존 병합 뷰 — 자동 재로드 금지·편집 textarea 보존 */}
+          {conflict && (
+            <div className="banner warn def-conflict" role="alert">
+              <p>⚠ 디스크의 정의가 편집 중 변경되었습니다. <b>편집 내용은 그대로 보존</b>됩니다(덮어쓰기 전 확인).</p>
+              <div className="def-conflict-actions">
+                <button onClick={copyEdited}>📋 편집분 클립보드 복사{copied && " ✓"}</button>
+                <button onClick={adoptDiskBase} title="디스크 최신본을 기준으로 삼아 편집분으로 덮어쓸 준비를 합니다(편집분 유지).">디스크 최신본 기준으로 재저장 준비</button>
+              </div>
+              {conflict.diskContent != null
+                ? <MergeView disk={conflict.diskContent} edited={edited} />
+                : <p className="muted">디스크 현재본을 불러오지 못했습니다 — 편집분을 복사해 수동 병합하세요.</p>}
+            </div>
+          )}
+
+          {/* A79/A85 저장 성공 착지 — 편집≠실행 안내 + Codex drift 경고 + 되돌리기 */}
+          {saveResult && (
+            <div className="banner ok def-saved" role="status">
+              <p>✓ 저장됨 · 이전 해시 <code className="path">{saveResult.prevHash.slice(0, 12)}</code> → 새 해시 <code className="path">{saveResult.newHash.slice(0, 12)}</code></p>
+              <p className="muted">이 저장은 정의 파일 기록만 합니다(실행 아님) — 실행하려면 <b>New Run / Ask Agent</b> 로 진행하세요.</p>
+              {saveResult.codexDriftWarning && (
+                <p className="warn-text">⚠ Codex 듀얼(.codex/.agents) 피어는 자동 갱신되지 않습니다 — drift 발생 가능(v0.7 비대상).</p>
+              )}
+              <button disabled={rbBusy} onClick={doRollback}>{rbBusy ? "되돌리는 중…" : "↩ 되돌리기 (직전 백업 복원)"}</button>
+            </div>
+          )}
+          {rolledBack && <p className="banner ok" role="status">↩ 직전 백업으로 되돌렸습니다.</p>}
+        </>
+      )}
+
+      {/* A85: 비가역 파일 변경 확인 다이얼로그(포커스 트랩·ESC 는 ConfirmDialog) */}
+      {confirmOpen && doc && (
+        <ConfirmDialog title="정의 파일 저장 확인" onCancel={() => setConfirmOpen(false)}>
+          <p className="muted">아래 정의 파일을 <b>비가역적으로 변경</b>합니다(직전 1개 백업 후 원자 교체). 취소하면 어떤 쓰기도 하지 않습니다.</p>
+          <p><code className="path">{doc.sourcePath}</code></p>
+          <DiffView before={doc.content} after={edited} />
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+          <div className="modal-actions">
+            <button onClick={() => setConfirmOpen(false)} disabled={saving}>취소 (변경 없음)</button>
+            <button className="primary" disabled={saving} onClick={doSave}>{saving ? "저장 중…" : "저장 (파일 쓰기)"}</button>
+          </div>
+        </ConfirmDialog>
+      )}
+    </Card>
   );
 }
 
@@ -920,6 +1187,9 @@ function SettingsBody({ info, onSaved }: { info: SettingsInfo; onSaved: () => vo
         </Card>
       )}
 
+      {/* F7 A78/A85: 정의 편집 게이트 토글 — off 기본·고위험 인지 후 활성. off 시 편집기 뷰어 전용 */}
+      <DefinitionEditToggle enabled={info.definitionEditEnabled} onSaved={onSaved} />
+
       {/* A85/A99/A101: dryRun 프리뷰 확인 다이얼로그 → "저장"=dryRun:false 쓰기. 취소 시 어떤 쓰기도 안 함 */}
       {preview && (
         <ProjectRootConfirm
@@ -990,5 +1260,55 @@ function ProjectRootConfirm({ path, preview, onCancel, onSaved }: {
         </button>
       </div>
     </ConfirmDialog>
+  );
+}
+
+// F7 A78/A85 — 정의 편집 게이트 토글. off 기본(fail-closed). 켜기 = 고위험(첫 파일 쓰기 기능) → 확인 다이얼로그.
+// 끄기는 위험 감소이므로 직접 적용. off 시 편집기 뷰어 전용(GET editable=false → PUT/rollback 403).
+function DefinitionEditToggle({ enabled, onSaved }: { enabled: boolean; onSaved: () => void }) {
+  const [confirmOn, setConfirmOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const apply = async (next: boolean) => {
+    setBusy(true); setErr(null);
+    try {
+      await setDefinitionEdit(next);
+      setConfirmOn(false);
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof DefEditError ? defEditErrorText(e.code, e.status, e.detail) : String(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card title="정의 편집 게이트 (F7 · A78 · 고위험)">
+      <p className="muted">
+        {enabled ? <><Badge kind="warn">활성</Badge> 에이전트/스킬 정의 파일(.claude) 편집이 허용됩니다.</>
+                 : <><Badge kind="ok">비활성</Badge> 편집기는 뷰어 전용입니다(파일 쓰기 불가).</>}
+      </p>
+      <div className="detail-actions">
+        {enabled
+          ? <button disabled={busy} onClick={() => apply(false)}>{busy ? "적용 중…" : "정의 편집 끄기 (뷰어 전용으로)"}</button>
+          : <button className="primary" disabled={busy} onClick={() => { setErr(null); setConfirmOn(true); }}>정의 편집 켜기…</button>}
+      </div>
+      {err && <p className="banner err" role="alert">⚠ {err}</p>}
+
+      {/* A85: 활성화는 첫 파일 쓰기 기능 → 고위험 명시 확인 게이트 */}
+      {confirmOn && (
+        <ConfirmDialog title="정의 편집 활성화 확인 (고위험)" onCancel={() => setConfirmOn(false)}>
+          <p className="muted">
+            정의 편집을 켜면 UI 에서 <b>.claude 정의 파일(에이전트/스킬)을 직접 수정</b>할 수 있게 됩니다.
+            이는 읽기전용 원칙의 유일한 예외이며 <b>파일이 곧 실행 정의</b>이므로 손상 시 실행에 직접 영향을 줍니다.
+          </p>
+          <p className="warn-text">⚠ 편집자=실행자 전제(로컬 단일 사용자). 저장은 원자 교체·직전 1개 백업으로 되돌릴 수 있습니다.</p>
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+          <div className="modal-actions">
+            <button onClick={() => setConfirmOn(false)} disabled={busy}>취소</button>
+            <button className="primary" disabled={busy} onClick={() => apply(true)}>{busy ? "적용 중…" : "활성화"}</button>
+          </div>
+        </ConfirmDialog>
+      )}
+    </Card>
   );
 }
