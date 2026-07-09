@@ -45,7 +45,7 @@
 - **목적:** 에이전트 정의(role·skills) **조회** + **1on1 요청 시작(F2)** + **usage 관측(F6)**.
 - **v0.5 기능:** 목록·상세(role·skills·sourcePath)·최근 실행상태 join(A3·A43).
 - **v0.6 추가:**
-  - **"이 에이전트에게 요청 (New Run)" 액션(A64·A67):** `GET /api/agents/:name/run-template`로 정의 프리필 → **편집가능 폼** → `POST /api/runs`(단일 경로 재사용). **allowedTools = 에이전트가 선언한 도구 체크박스로만**(자유입력 없음·U⊆D 구조 보장)·D 밖 요청은 400 명시 반려·**조용한 드롭 없음**(A65·A100).
+  - **"이 에이전트에게 요청 (New Run)" 액션(A64·A67):** `GET /api/agents/:name/run-template`로 정의 프리필 → **편집가능 폼** → `POST /api/runs`(단일 경로 재사용). **allowedTools = 에이전트가 선언한 도구 체크박스로만**(자유입력 없음·U⊆D 구조 보장)·D 밖 요청은 400 반려·**조용한 드롭 없음**(A65·A100)·**제출 시점 정의 재조회·D 재도출(정의 삭제/변경 시 `409 agent-definition-changed`+새로고침·천장우회 차단·R4-#1)**.
   - **usage 섹션(F6·A63):** 이 에이전트의 토큰·호출·연결 스킬·선언≠관측 gap(measured/estimated 라벨).
   - **정의 편집(F7·A72-A80):** "정의 편집" 버튼 → `GET/PUT /api/agents/:name/definition`(원문 편집·`.claude/agents/*.md`만·무결성 검증·원자쓰기·낙관적 동시성·rollback). 스코프 게이트 `definitionEditEnabled` off면 **비활성(뷰어만)**.
 - **하지 않는 것(경계):** **대화형 아님**(최초 1회 제출). **편집은 정의 파일(`.claude`)만·실행 아님**(저장≠실행 — 실행은 New Run/Ask Agent 경유·DW9). Codex 정의(`.codex/*.toml`) 편집 안 함(v0.7)·docs 편집 불가(F5 읽기전용)·신규 생성/삭제 안 함(v0.7).
@@ -92,10 +92,10 @@
 ### 2.9 Eval — **평가 대시보드·자기개선 제안·지표관리(F8·9번째 화면·A102-A112)**
 - **목적:** 하네스 self-eval(`loop_scorecard`)을 UI로 — (A) 평가 결과 확인 (B) 자기개선 제안 (C) 평가지표 관리.
 - **v0.6 신규(3부):**
-  - **Part A 결과 확인(읽기전용·A102-A104):** **추세=신뢰 `<state_home>/evals-rollup`(체인 검증)에서만 소싱**(`_workspace/summary.jsonl`=표시 소스 아님·"미검증"). **ingest=서버 재도출-후-서명(판정 원장 `verdicts.json`서 집계 직접 재계산·`_workspace` precomputed 신뢰 안 함·자기일관 위조 aggregate 격리·R7)→이후 과거 scorecard 무결성=rollup digest(현재키 재검증 안 함→회전 무브릭·R5)**·`_workspace` 파일=표시용(digest 불일치=상세 "변조"·게이트 브릭 없음)·graceful(500 아님). **`alignment_score`="정합도(품질 아님)·자기채점=약증거→사람 승인 backstop"**·null=미측정(A103).
+  - **Part A 결과 확인(GET 읽기전용·side-effect 0·A102-A104):** **전 `GET /api/evals*`는 상태변경 0**(ingest=서버 백그라운드 잡·자동·요청 무관·수동 재구축만 `POST /api/evals/rebuild`·통합감사 R3). **추세=신뢰 `<state_home>/evals-rollup`(체인 검증)에서만 소싱**(`_workspace/summary.jsonl`=표시 소스 아님·"미검증"). **ingest=서버 재도출-후-서명(판정 원장 `verdicts.json`서 집계 직접 재계산·`_workspace` precomputed 신뢰 안 함·자기일관 위조 aggregate 격리·R7)→이후 과거 scorecard 무결성=rollup digest(현재키 재검증 안 함→회전 무브릭·R5)**·`_workspace` 파일=표시용(digest 불일치=상세 "변조"·게이트 브릭 없음)·graceful(500 아님). **`alignment_score`="정합도(품질 아님)·자기채점=약증거→사람 승인 backstop"**·null=미측정(A103).
   - **Part B 자기개선 제안(제안+승인·A105-A108):** 악화 트리거→**근거 제안 카드(DV8 XSS 차단·provenance)**→**CTA "편집기에서 검토·저장"(승인=반영 아님·전환 前 "아직 적용되지 않음"·F7 저장 완료 전 "미적용" 유지→유실 방지·UX-R1-#3)**→**서명 envelope(config 결속·가변 rollup-head 미결속)+durable nonce가 F7 열기만→F7이 payload==승인·config 해시 일치+A106 현재 rollup 재평가·근거→diff→별도 저장(불일치 409 stale·대기 중 append돼도 게이트 만족 시 도달)**. **게이트=rollup 엔트리만(체인+head)·gate-time `_workspace` 재읽기 없음(변조 게이트 영향 0·R6)**·단계<3 비활성. **무결성 상태=영향+복구 명시(UX-R1-#2):** "상세 파일 불일치—추세·게이트는 검증 rollup 사용(안전)"·"rollup 훼손—제안 차단". *(state_home 조율 rollback=게임오버·out-of-scope.)*
   - **Part C 지표관리(mutating·A109-A111):** 채택 단계(**쓰기 1-3만·4 display-only 잠금·비활성 사유만 표시**)·per-metric·임계·정규화. 저장=F3.7 **per-leaf 독립 복구(형제 보존)+effective=max(값,floor)**·fail-closed. **UX(UX-R1-#4): 입력 옆 최소 30/10/3 상시 표시·floor 미만 저장 전 인라인 거부(silent clamp 금지)·old→new/effective diff·적용값 피드백**·**확인 대상=단계 3 전환 + 지표/정규화 변경(Stage 4는 확인 아니라 잠금)**.
-- **하지 않는 것(경계·중요):** **자동 개선 아님 — 제안만**(자동 적용 절대 금지·**Stage 4 쓰기 없음·display-only**·사람 승인 F7 별도 저장·Goodhart 방지). **`alignment_score`를 품질/정밀도로 표시 안 함.** scorecard 텍스트를 **지시로 흡수 안 함**(데이터일 뿐). 생성물 품질평가(`artifact_benchmark`)는 **v0.7**(혼합 안 함). 평가 데이터 **생성** 안 함 — 소비만(Part C config 제외). **no-auto-apply 경계에 `tools`·`skills` 포함**(위험 tool 자동주입 차단).
+- **하지 않는 것(경계·중요):** **자동 개선 아님 — 제안만**(자동 적용 절대 금지·**Stage 4 쓰기 없음·display-only**·사람 승인 F7 별도 저장·Goodhart 방지). **`alignment_score`를 품질/정밀도로 표시 안 함.** scorecard 텍스트를 **지시로 흡수 안 함**(데이터일 뿐). 생성물 품질평가(`artifact_benchmark`)는 **v0.7**(혼합 안 함). scorecard **생성** 안 함(스크립트 소관)·**GET은 side-effect 0**(ingest=서명 rollup append는 서버 백그라운드 잡·GET 부작용 아님·R3). **no-auto-apply 경계에 `tools`·`skills` 포함**(위험 tool 자동주입 차단).
 - **관계:** 제안 승인 → **F7 편집기**(에이전트/스킬 반영). 지표관리 저장 → 공유 config(F3.7·Settings 토글과 동일 파일). 사이드바 **"점검" 그룹**(Overview·Drift·Ops·Eval·RF5).
 
 ---
@@ -162,6 +162,10 @@
 - **F8 UX 감사 R2(codex 1건) 반영:** rollup 무결성 훼손 데드엔드 해소(진단 + 복구 CTA·비악의 훼손만·조율 rollback은 게임오버 유지).
 - **F8 UX 감사 R3(agy no-high·codex 1건) 반영:** §2.10·A112 — **재구축 검증 소스 명세**: (a) ingest 시 **독립 서명 receipt(`<state_home>/evals-receipts`·keyId) 별도 저장**·(b) **키링 전 이력 키 보존(재구축 재검증 전용·정상운영은 chain+head·구키 불요·모순 없음)**·(c) 재구축=**독립 receipt 통과분만**·(d) **독립 소스 전무 시 재구축 불가+명시 리셋만(미검증 `_workspace` 재신뢰 금지)**. design F8.1/F8.8/A112/AS8와 정합.
 - **F8 최종확인 R4(agy no-high·codex 1건·stale 문구) 반영:** design F8.1 키링 문구 모순 제거 — 단일 키 규율(정상운영=체인+head-HMAC·재구축=키링+독립 receipt)·키 보존 불변식(회전 시 구키 폐기 안 함·원자 회전). **F8 완전 수렴(보안 R1~R7·UX R1~R3·문구 정합).**
+- **v0.6 최종 통합감사 R1(codex+agy·교차기능 4건) 반영:** 화면 경계 무변경·design 내부 정정 — #1 공유 config 전 필드 보존 RMW·#2 `manifest.agent` additive 델타(Agents 요청→Runs 에이전트 필터 흐름 정합)·#3 Runs/Eval 공용 경화 리더(심링크 run dir 차단)·#4 F8 제안→F7 `evalProposal`+DW11 결속(제안 우회 저장 0).
+- **v0.6 통합감사 R2(codex+agy·R1이 부른 새 이슈 4건) 반영:** design 내부 정정(화면 경계 무변경) — #1 config `evals` 재귀 per-leaf(한 잎 손상이 형제 clobber 0)·#2 **envelope config-hash=Part C `evals`만·운영 플래그 제외**(`definitionEditEnabled` 토글이 대기 제안 무효화 0·데드락 해소)·#3 **일반 편집=상시 허용·우회 아님**(envelope는 "승인된 제안" 주장에만·Eval Part B "검토·저장" CTA와 정합)·#4 공용 리더 앵커 파라미터화(F8=`<state_home>/evals-rollup` 읽기 가능). design F3.7/F8.3/A107/DW11/A50-A60-A102와 정합.
+- **v0.6 통합감사 R3(agy no-high·codex 1건) 반영:** Eval(§2.9) — **ingest(쓰기)와 GET(읽기) 분리 명확화**: ingest=서버 백그라운드 잡(자동)·**전 `GET /api/evals*` side-effect 0**·수동 재구축(UX-R2 CTA)=인증 mutating `POST /api/evals/rebuild`. "Part A 읽기전용"은 GET 뷰 한정. design F8.1/F8.2/A102와 정합.
+- **v0.6 통합감사 R4(agy no-high·codex 2건·R2/R3 파생) 반영:** Agents(2.3)·Eval(§2.9) — **#1 F2 제출 시점 D 재도출**(template↔제출 사이 정의 삭제/변경 시 `409 agent-definition-changed`·U⊆D 천장우회 차단)·**#2 F8 nonce 발급=`POST …/prepare`(GET 아님)·`issued→applying→consumed` 상태머신·멱등 재시도(크래시 유실 0·중복적용 0)**. design F2.3/A66/F8.3/DW11/A107과 정합. **v0.6 통합 수렴.**
 - **미해결:**
   1. **DESIGN.md(Linear) 정합 상세** — 사이드바 5그룹(RF5)·배지 kind·스켈레톤 컴포넌트가 Linear 토큰과 맞는지 UX 감사에서 시각 검증(A91/A92).
   2. **URL 쿼리 반영 범위(A88)** — F4 필터를 URL에 반영(공유·새로고침 보존)하되 민감정보 미노출 확인.
