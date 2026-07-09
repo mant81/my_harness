@@ -15,9 +15,11 @@ const SCREENS = [
 ] as const;
 
 export function App() {
-  const [cur, setCur] = useState<string>(() => location.hash.replace(/^#\/?/, "") || "overview");
+  // hash 에서 화면 id 만 추출(딥링크 쿼리 `#/runs?run=<id>` 지원 — `?` 이후는 화면별 소비).
+  const idOf = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "overview";
+  const [cur, setCur] = useState<string>(idOf);
   useEffect(() => {
-    const on = () => setCur(location.hash.replace(/^#\/?/, "") || "overview");
+    const on = () => setCur(idOf());
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);

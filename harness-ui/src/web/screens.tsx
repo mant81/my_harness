@@ -8,9 +8,13 @@ import {
 } from "./metrics.js";
 import {
   apiPost, fetchArtifact, downloadDoc, downloadArtifact,
-  encodeDocPath, DownloadTooLargeError,
+  encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
   type DocsNode, type DocsTree, type DocPreview,
 } from "./api.js";
+import {
+  type RunTemplate, type RunSubmitResult,
+  toggleSelected, runSubmitErrorText, focusRunFromHash, runsDeepLink,
+} from "./agent-run.js";
 import { renderMarkdown } from "./render.js";
 import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath } from "./docs-view.js";
 import {
@@ -230,10 +234,11 @@ export function Build() {
   );
 }
 
-// ── 3. Agents (A3) ──
+// ── 3. Agents (A3 · F2 M10 프리필 New Run) ──
 export function Agents() {
   const st = useApi<{ agents: Array<{ name: string; runtime: string; sourcePath: string; role: string; skills: string[] }> }>("/api/agents");
   const [sel, setSel] = useState<string | null>(null);
+  const [runFor, setRunFor] = useState<string | null>(null); // F2: New Run 프리필 폼 대상 에이전트
   return (
     <div className="screen">
       <h2>Agents</h2>
@@ -247,12 +252,139 @@ export function Agents() {
               <p className="muted">{a.sourcePath} · {a.runtime}</p>
               <p>{a.role || "(설명 없음)"}</p>
               {a.skills.length > 0 && <p>스킬: {a.skills.join(", ")}</p>}
+              {/* F2 W1/A67: 프리필 New Run 진입점(라벨 RF2 정합) */}
+              <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
             </Card>
           ) : null; })()}
         </div>
       )}</Async>
+      {/* F2 W1/A83: 프리필 폼은 상세 카드와 독립 카드로 렌더 — run-template 로드 실패가 Agents 화면 전체를 무너뜨리지 않음 */}
+      {runFor && <AgentRunForm key={runFor} name={runFor} onClose={() => setRunFor(null)} />}
       {/* F6 W3: usage 섹션은 자체 metrics/agents 페치로 독립 로딩(W9/A83) */}
       <AgentsUsage />
+    </div>
+  );
+}
+
+// F2 M10 — 에이전트 프리필 New Run 폼(대화형 아님·최초 1회 제출·fire-and-observe).
+// run-template 을 로드(A83 독립 3-state) → Build 동형 편집폼. allowedTools 는 D 체크박스로만(A100·U⊆D 구조 보장).
+const TARGET_ENUM = ["agents", "skills", "orchestrator"] as const;
+
+function AgentRunForm({ name, onClose }: { name: string; onClose: () => void }) {
+  const tmpl = useApi<RunTemplate>(`/api/agents/${encodeURIComponent(name)}/run-template`);
+  return (
+    <Card title={`New Run · ${name}`}>
+      <button className="link" onClick={onClose}>✕ 닫기</button>
+      {/* A83: 폼 영역만 독립 로딩/에러(3-state) — 실패해도 상세 카드·usage 유지 */}
+      <Async state={tmpl}>{(t) => <AgentRunFormBody template={t} />}</Async>
+    </Card>
+  );
+}
+
+function AgentRunFormBody({ template }: { template: RunTemplate }) {
+  const D = template.suggestedAllowedTools;
+  const [runtime, setRuntime] = useState<"codex" | "claude">(template.runtime);
+  const [mode, setMode] = useState("build");
+  const [domain, setDomain] = useState(template.domainTemplate);
+  const [perm, setPerm] = useState<"read-only" | "workspace-write">(template.permissionMode);
+  const [permConfirmed, setPermConfirmed] = useState(false); // A85: workspace-write 상향 명시 확인
+  const [targets, setTargets] = useState<string[]>(() => TARGET_ENUM.filter((x) => template.targets.includes(x)));
+  const [tools, setTools] = useState<string[]>(() => [...D]); // U=D 기본(사용자는 D 내에서 뺄 수만)
+  const [dry, setDry] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RunSubmitResult | null>(null);
+  const [err, setErr] = useState<string | null>(null); // 400/409 인라인 매핑(A100)
+
+  const permBlocked = perm === "workspace-write" && !permConfirmed; // A85 미확인 시 제출 차단
+  const changePerm = (v: "read-only" | "workspace-write") => { setPerm(v); if (v === "read-only") setPermConfirmed(false); };
+  const toggleTarget = (t: string, on: boolean) =>
+    setTargets((prev) => on ? [...new Set([...prev, t])] : prev.filter((x) => x !== t));
+
+  const submit = async () => {
+    setBusy(true); setErr(null); setResult(null);
+    try {
+      const r = await submitRun({
+        runtime, mode, domain, permissionMode: perm, targets,
+        allowedTools: tools, dryRun: dry,
+        agent: template.agent, agentFingerprint: template.fingerprint, // 지문 echo(stale 폼 → 409)
+      });
+      setResult(r);
+    } catch (e) {
+      if (e instanceof RunSubmitError) setErr(runSubmitErrorText(e.status, e.code, e.detail));
+      else setErr(String(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="form">
+      <label>런타임
+        <select value={runtime} onChange={(e) => setRuntime(e.target.value as "codex" | "claude")}>
+          <option value="codex">codex</option><option value="claude">claude</option>
+        </select>
+      </label>
+      <label>모드<input value={mode} onChange={(e) => setMode(e.target.value)} maxLength={40} /></label>
+      <label>권한
+        <select value={perm} onChange={(e) => changePerm(e.target.value as "read-only" | "workspace-write")}>
+          <option value="read-only">read-only (기본·보수적)</option>
+          <option value="workspace-write">workspace-write</option>
+        </select>
+      </label>
+      <label className="full">작업(domain)<textarea value={domain} onChange={(e) => setDomain(e.target.value)} maxLength={4000} rows={4} /></label>
+
+      {/* F2 W2/A100: allowedTools = 에이전트 정의 D 체크박스로만(자유입력 없음 → U⊆D 구조 보장) */}
+      <fieldset className="tool-fieldset full">
+        <legend>도구 (allowedTools)</legend>
+        <p className="muted">이 에이전트가 선언한 도구만 선택 가능 · D 밖 추가 불가(뺄 수만).</p>
+        {D.length === 0
+          ? <p className="muted">🕳 이 에이전트는 도구를 선언하지 않았습니다(도구 없이 실행).</p>
+          : D.map((t) => (
+              <label key={t} className="check">
+                <input type="checkbox" checked={tools.includes(t)}
+                  onChange={(e) => setTools((prev) => toggleSelected(prev, t, e.target.checked, D))} />
+                {t}
+              </label>
+            ))}
+      </fieldset>
+
+      {/* targets(정의 프리필·enum 편집) */}
+      <fieldset className="target-fieldset full">
+        <legend>대상(targets)</legend>
+        {TARGET_ENUM.map((t) => (
+          <label key={t} className="check">
+            <input type="checkbox" checked={targets.includes(t)} onChange={(e) => toggleTarget(t, e.target.checked)} />
+            {t}
+          </label>
+        ))}
+      </fieldset>
+
+      <label className="check"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> dry-run(미리보기만)</label>
+
+      {/* A85: 권한 상향 위험 확인(색 아님·아이콘+텍스트·명시 확인 게이트) */}
+      {perm === "workspace-write" && (
+        <div className="banner warn full" role="note">
+          <p>⚠ workspace-write 는 파일 쓰기 권한을 상향합니다. run-template 기본은 read-only 입니다.</p>
+          <label className="check"><input type="checkbox" checked={permConfirmed} onChange={(e) => setPermConfirmed(e.target.checked)} /> 권한 상향을 확인합니다</label>
+        </div>
+      )}
+
+      <button className="primary" disabled={busy || !domain || !mode || permBlocked} onClick={submit}>
+        {busy ? "제출 중…" : dry ? "미리보기" : "실행"}
+      </button>
+      {!dry && <p className="warn-text">⚠ 실 실행은 CLI 프로세스를 spawn합니다(fire-and-observe · 대화형 아님).</p>}
+
+      {/* A100: 서버 거부(400 unauthorized-tool·409 agent-definition-changed) 인라인 — 조용한 드롭 아님 */}
+      {err && <p className="banner err full" role="alert">⚠ {err}</p>}
+
+      {/* A87: 제출 성공 착지 배너 + runId 딥링크(→ Runs에서 관찰) */}
+      {result && (result.dryRun
+        ? <div className="banner full" role="status">
+            <p>👁 미리보기(파일 미기록) · runId <code className="path">{result.runId}</code></p>
+            <pre className="out">{JSON.stringify(result.preview, null, 2)}</pre>
+          </div>
+        : <div className="banner ok full" role="status">
+            <p>✓ 실행이 생성되었습니다 · runId <code className="path">{result.runId}</code></p>
+            <a className="link" href={runsDeepLink(result.runId)}>→ Runs에서 관찰</a>
+          </div>)}
     </div>
   );
 }
@@ -296,7 +428,9 @@ const stateKind = (s: string | null): "ok" | "err" | "warn" | "muted" =>
 
 export function Runs() {
   const [filter, setFilter] = useState<RunsFilter>(() => parseQuery(location.search));
-  const [sel, setSel] = useState<string | null>(null);
+  // A87: Agents New Run 딥링크(#/runs?run=<id>) 도착 시 해당 run 을 초기 선택 + 착지 배너.
+  const [focus] = useState<string | null>(() => focusRunFromHash(location.hash));
+  const [sel, setSel] = useState<string | null>(() => focusRunFromHash(location.hash));
   const qs = buildQuery(filter);
   // 필터 → 쿼리스트링 → refetch(path 변경 시 useApi 자동 재요청). 항상 인자 분기 → 신규 shape.
   const st = useApi<RunsQueryResult>("/api/runs?" + qs);
@@ -309,6 +443,10 @@ export function Runs() {
   return (
     <div className="screen">
       <h2>Runs</h2>
+      {/* A87: New Run 딥링크 착지 배너(방금 생성한 run 관찰) */}
+      {focus && sel === focus && (
+        <div className="banner ok" role="status">👁 방금 생성한 run 을 관찰 중 · <code className="path">{focus}</code></div>
+      )}
       {/* A83: 필터바는 fetch 상태와 독립 렌더 — 목록 로딩/에러가 필터바를 무너뜨리지 않음 */}
       <FilterBar filter={filter} onApply={setFilter} />
       {chips.length > 0 && (

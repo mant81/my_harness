@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { detectRuntimes } from "../adapters/runtime.js";
-import { harnessInventory, readAgents, readSkills } from "../adapters/harness.js";
+import { harnessInventory, readAgents, readSkills, findAgent, agentFingerprint } from "../adapters/harness.js";
 import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapters/runs.js";
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
@@ -32,6 +32,24 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
     if (!okName(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
     const found = (await readAgents(projectRoot)).find((a) => a.name === req.params.name);
     return found ?? reply.code(404).send({ error: "not-found" });
+  });
+
+  // F2(M10·A64): 에이전트 프리필 초안(정의에서 재도출·클라 주장 무시·read-only·side-effect 0).
+  // :name 은 FS 재도출 진입점 → isSafeSegment 상향(../·공백/메타 거부, `/api/agents/:name` 의 okName 보다 엄격).
+  // suggestedAllowedTools = 정의 tools = U⊆D 상한 D. permissionMode 는 항상 보수적 read-only(상향은 사용자 명시).
+  app.get<{ Params: { name: string } }>("/api/agents/:name/run-template", async (req, reply) => {
+    if (!isSafeSegment(req.params.name)) return reply.code(400).send({ error: "invalid-name" });
+    const info = await findAgent(projectRoot, req.params.name);
+    if (!info) return reply.code(404).send({ error: "not-found" });
+    return {
+      agent: info.name,
+      runtime: info.runtime,
+      domainTemplate: info.domainTemplate,
+      targets: info.targets,
+      suggestedAllowedTools: info.tools,
+      permissionMode: "read-only",
+      fingerprint: agentFingerprint(info),
+    };
   });
 
   app.get("/api/skills", async () => ({ skills: await readSkills(projectRoot) }));
@@ -151,10 +169,29 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   });
 
   // 실행(M5, 위험작업): Zod 검증 → dry-run(파일 미기록 미리보기) 또는 spawn.
+  // F2(M10): agent 지정 시 제출 시점 정의 재조회·D 재도출(템플릿 시점 D 신뢰 금지·R4-#1) → U⊆D 강제.
+  //   D 밖 도구 → 400 unauthorized-tool(조용한 드롭 금지). 정의 부재/지문 변경(stale 폼) → 409 agent-definition-changed.
+  //   agent 미지정 일반 New Run = D 상한 없음 = v0.5 계약 그대로.
   app.post("/api/runs", async (req, reply) => {
     const parsed = RunRequest.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid-request", detail: parsed.error.issues });
-    return launchRun(projectRoot, parsed.data);
+    const r = parsed.data;
+    if (r.agent) {
+      const info = await findAgent(projectRoot, r.agent); // 제출 시점 재도출(TOCTOU 방어)
+      const hasTools = r.allowedTools.length > 0;
+      if (!info) {
+        // 상한 검증 불가(비어있지 않은 U) 또는 클라가 지문을 echo(stale 폼) → 명시 반려. 태그만(빈 U·지문 없음) 은 무해 허용.
+        if (hasTools || r.agentFingerprint) return reply.code(409).send({ error: "agent-definition-changed" });
+      } else {
+        if (r.agentFingerprint && r.agentFingerprint !== agentFingerprint(info)) {
+          return reply.code(409).send({ error: "agent-definition-changed" });
+        }
+        const D = new Set(info.tools);
+        const extra = r.allowedTools.filter((t) => !D.has(t)); // U \ D
+        if (extra.length) return reply.code(400).send({ error: "unauthorized-tool", detail: extra });
+      }
+    }
+    return launchRun(projectRoot, r);
   });
   app.post<{ Params: { runId: string } }>("/api/runs/:runId/cancel", async (req, reply) => {
     if (!isSafeSegment(req.params.runId)) return reply.code(400).send({ error: "invalid-runId" });

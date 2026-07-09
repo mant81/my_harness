@@ -1,4 +1,5 @@
 // API 클라이언트 — session 토큰(Bearer) 첨부. 쿼리 토큰 금지(§0-VOID). XSS: 반환값은 React 가 escape.
+import type { RunSubmitResult } from "./agent-run.js";
 // 세션 단일 출처 = sessionStorage(모듈 인스턴스 분리·리로드에도 일관). getSession() 이 유일 판독기.
 const KEY = "harness-session";
 function getSession(): string | null { try { return sessionStorage.getItem(KEY); } catch { return null; } }
@@ -7,10 +8,13 @@ function clearSession(): void { try { sessionStorage.removeItem(KEY); } catch { 
 
 // fragment(#) 토큰 → session 교환. strip 을 fetch 이전에 동기 수행(A34: 왕복 중 주소창 노출 방지).
 // hash 있으면 항상 재교환(무효 캐시 덮어씀). 없으면 캐시 사용. 교환 성공분만 신뢰.
+// ★ router hash(`#/...`)는 화면 라우팅·딥링크(`#/runs?run=`)용 — bootstrap 토큰으로 오소비 금지.
+//   런처 fragment 토큰은 `#<hex>`(§A34·`#/` 로 시작 안 함)만 해당 → 새 탭/리로드서 run focus 보존.
 export async function bootstrapSession(): Promise<string | null> {
-  const hash = location.hash.startsWith("#") ? decodeURIComponent(location.hash.slice(1)) : "";
-  if (!hash) return getSession();
-  history.replaceState(null, "", location.pathname + location.search); // ★ fetch 이전 동기 strip
+  const isToken = location.hash.startsWith("#") && !location.hash.startsWith("#/");
+  const hash = isToken ? decodeURIComponent(location.hash.slice(1)) : "";
+  if (!hash) return getSession(); // router hash(또는 hash 없음) → 캐시 세션 사용·hash 보존
+  history.replaceState(null, "", location.pathname + location.search); // ★ fetch 이전 동기 strip(토큰만 제거)
   try {
     const r = await fetch("/api/auth/exchange", {
       method: "POST", headers: { "content-type": "application/json" },
@@ -47,6 +51,32 @@ export async function apiPost<T = unknown>(path: string, body: unknown): Promise
     throw new Error(`${r.status}: ${JSON.stringify(detail)}`);
   }
   return r.json() as Promise<T>;
+}
+
+// ── F2 에이전트 프리필 New Run(M10) ──
+// POST /api/runs 거부(400 unauthorized-tool·409 agent-definition-changed)를 구조 보존 승격.
+// error/detail 을 그대로 담아 UI 가 한국어로 매핑(agent-run.runSubmitErrorText·A100 — 조용한 드롭 금지).
+export class RunSubmitError extends Error {
+  constructor(public readonly status: number, public readonly code: string, public readonly detail?: string[]) {
+    super(code);
+    this.name = "RunSubmitError";
+  }
+}
+
+// 실행 제출 — apiPost(문자열 throw)와 달리 status/error/detail 구조 보존(400/409 인라인 매핑용).
+export async function submitRun(body: unknown): Promise<RunSubmitResult> {
+  const r = await fetch("/api/runs", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
+    const detail = Array.isArray(d.detail) ? d.detail.map((x: unknown) => String(x)) : undefined;
+    throw new RunSubmitError(r.status, String(d.error ?? r.status), detail);
+  }
+  return r.json() as Promise<RunSubmitResult>;
 }
 
 // ── F5 문서/artifact 뷰어(M8) ──

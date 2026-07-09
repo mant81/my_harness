@@ -14,6 +14,10 @@ export function stateHome(): string {
 
 export const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
+// argv 요소 token allowlist (leading-dash/dot 금지 → flag injection 방어). exec-run(allowedTools·model)·
+// harness(에이전트 tools D 도출) 공유 단일 출처. SAFE_SEGMENT 보다 엄격(첫 글자 영숫자 강제).
+export const ARGV_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+
 // 경로 세그먼트 allowlist (빈/`.`/`..`/메타 거부). 엄격 ASCII(runId·artifact 등) — 불변.
 export function isSafeSegment(seg: string): boolean {
   if (!seg || seg === "." || seg === "..") return false;

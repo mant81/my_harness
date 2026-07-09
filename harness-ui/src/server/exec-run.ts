@@ -3,9 +3,10 @@ import { z } from "zod";
 import { join } from "node:path";
 import { superviseRun, writeManifest, writeStatus, newRunId, SUPERVISOR_VERSION } from "./supervisor/supervisor.js";
 import type { Manifest } from "./schemas.js";
+import { ARGV_TOKEN as noFlag } from "./lib/paths.js";
 
-// model·allowedTools 는 argv 요소 → leading-dash 금지(flag injection 방어). 영숫자로 시작.
-const noFlag = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+// model·allowedTools·agent 는 argv/태그 요소 → leading-dash 금지(flag injection 방어). 영숫자로 시작.
+// noFlag = lib/paths.ARGV_TOKEN(단일 출처 — harness D 도출과 동일 규칙).
 export const RunRequest = z.object({
   runtime: z.enum(["claude", "codex"]),
   mode: z.string().min(1).max(40),
@@ -15,6 +16,11 @@ export const RunRequest = z.object({
   targets: z.array(z.enum(["agents", "skills", "orchestrator"])).max(8).default([]),
   allowedTools: z.array(z.string().regex(noFlag).max(60)).max(40).default([]),
   dryRun: z.boolean().default(true),
+  // F2(M10): 단일 대상 에이전트 귀속 태그(additive optional·null=일반 New Run=v0.5 계약).
+  // 형식검증만(경로 조립 아님) — U⊆D 상한은 POST 라우트가 디스크 정의에서 D 재도출로 강제.
+  agent: z.string().regex(noFlag).max(120).nullable().default(null),
+  // stale 폼 탐지용 정의 지문(run-template echo·통합감사 R4-#1). 불일치 → 409(선택적·미제공 시 U⊆D 재검사가 천장 보장).
+  agentFingerprint: z.string().max(64).nullable().default(null),
 });
 export type RunRequest = z.infer<typeof RunRequest>;
 
@@ -44,7 +50,7 @@ function manifest(runId: string, projectRoot: string, req: RunRequest): Manifest
   return {
     schemaVersion: "1", runId, projectRoot, runtime: req.runtime, mode: req.mode,
     createdAt: new Date().toISOString(), requestedBy: "local-user", goal: req.domain.slice(0, 200),
-    agents: [], agent: null, targets: req.targets, permissionMode: req.permissionMode, model: req.model, supervisorVersion: SUPERVISOR_VERSION,
+    agents: [], agent: req.agent ?? null, targets: req.targets, permissionMode: req.permissionMode, model: req.model, supervisorVersion: SUPERVISOR_VERSION,
   };
 }
 
