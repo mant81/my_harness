@@ -1,8 +1,13 @@
 // 8화면(§IA: Overview·Build·Agents·Skills·Runs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
 // XSS: 전 텍스트 React escape. innerHTML/dangerouslySetInnerHTML 미사용. 사용자 입력은 서버 Zod 재검증.
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useApi, Async, Badge, Card, Table } from "./ui.js";
 import { apiPost, fetchArtifact } from "./api.js";
+import {
+  type RunsFilter, type RunsQueryResult, type ChipField,
+  parseQuery, buildQuery, setField, clearField, clearAll, activeChips, hasActiveFilter,
+  toggleOrder, pageTo, truncationNotice, pageRange, nextOffset, prevOffset,
+} from "./runs-filter.js";
 
 type Inv = { projectRoot: string; claude: { entrypoint: string | null; agents: number; skills: number }; codex: { entrypoint: string | null; agents: number; skills: number }; workspace: { exists: boolean; runs: number } };
 type Rt = Record<string, { installed: boolean; version: string | null }>;
@@ -149,30 +154,160 @@ export function Skills() {
   );
 }
 
-// ── 5. Runs (A5·A6 — 목록·상세·이벤트·agent status·artifact) ──
+// ── 5. Runs (A5·A6·A52 — 필터/검색/정렬/페이지·목록·상세) ──
+// 서버 enum(schemas.ts RunState/Runtime) 과 정확히 일치.
+const RUN_STATES = ["queued", "running", "blocked", "failed", "completed", "cancelled", "stale"] as const;
+const RUNTIMES = ["claude", "codex"] as const;
+const SORT_OPTS: Array<[RunsFilter["sort"], string]> = [
+  ["recordedAt", "기록 시각"], ["updatedAt", "갱신 시각"], ["state", "상태"],
+];
+const stateKind = (s: string | null): "ok" | "err" | "warn" | "muted" =>
+  s === "completed" ? "ok" : s === "failed" || s === "cancelled" ? "err" : s === "blocked" || s === "stale" ? "warn" : "muted";
+
 export function Runs() {
-  const st = useApi<{ runs: Array<{ runId: string; valid: boolean; status: { state: string; progress: number; updatedAt: string } | null }> }>("/api/runs");
+  const [filter, setFilter] = useState<RunsFilter>(() => parseQuery(location.search));
   const [sel, setSel] = useState<string | null>(null);
+  const qs = buildQuery(filter);
+  // 필터 → 쿼리스트링 → refetch(path 변경 시 useApi 자동 재요청). 항상 인자 분기 → 신규 shape.
+  const st = useApi<RunsQueryResult>("/api/runs?" + qs);
+  // W2 URL 쿼리 반영(공유·새로고침 보존) — hash 라우팅(#/runs) 보존.
+  useEffect(() => {
+    history.replaceState(null, "", location.pathname + "?" + qs + location.hash);
+  }, [qs]);
+
+  const chips = activeChips(filter);
   return (
     <div className="screen">
       <h2>Runs</h2>
-      <Async state={st}>{(d) => d.runs.length === 0 ? <div className="muted">실행 없음 (A5be)</div> : (
-        <div className="split">
-          <Table cols={["runId", "상태", "진행", "갱신"]} rows={d.runs.map((r) => [
-            <button className="link" onClick={() => setSel(r.runId)}>{r.runId.slice(0, 30)}</button>,
-            r.status ? <Badge kind={r.status.state === "completed" ? "ok" : r.status.state === "failed" ? "err" : "muted"}>{r.status.state}</Badge> : <Badge kind="err">무효</Badge>,
-            r.status ? `${r.status.progress}%` : "—", r.status?.updatedAt?.slice(0, 19) ?? "—",
-          ])} />
-          {sel && <RunDetail key={sel} runId={sel} />}
+      {/* A83: 필터바는 fetch 상태와 독립 렌더 — 목록 로딩/에러가 필터바를 무너뜨리지 않음 */}
+      <FilterBar filter={filter} onApply={setFilter} />
+      {chips.length > 0 && (
+        <div className="chips" role="group" aria-label="활성 필터">
+          {chips.map((c) => (
+            <span key={c.key} className="chip">
+              <span className="chip-label">{c.label}: {c.value}</span>
+              <button className="chip-x" aria-label={`${c.label} 필터 제거`} title={`${c.label} 필터 제거`}
+                onClick={() => setFilter(clearField(filter, c.key as ChipField))}>✕</button>
+            </span>
+          ))}
+          <button className="link chip-clear" onClick={() => setFilter(clearAll())}>필터 초기화</button>
         </div>
+      )}
+      <Async state={st}>{(d) => (
+        <>
+          <ResultBar data={d} onPage={(o) => setFilter(pageTo(filter, o))} />
+          {d.items.length === 0 ? (
+            <div className="empty" role="status">
+              <p className="muted">🔍 조건에 맞는 run 없음</p>
+              {hasActiveFilter(filter)
+                ? <button className="link" onClick={() => setFilter(clearAll())}>필터 초기화</button>
+                : <p className="muted">아직 실행 이력이 없습니다.</p>}
+            </div>
+          ) : (
+            <div className="split">
+              <Table cols={["runId", "상태", "런타임", "모드", "목표", "기록 시각"]} rows={d.items.map((r) => [
+                <button className="link" onClick={() => setSel(r.runId)}>{r.runId.slice(0, 30)}</button>,
+                <Badge kind={stateKind(r.state)}>{r.state ?? "무효"}</Badge>,
+                r.runtime ?? "—", r.mode ?? "—",
+                r.goal ? r.goal.slice(0, 60) : <span className="muted">—</span>,
+                r.recordedAt.slice(0, 19),
+              ])} />
+              {sel && <RunDetail key={sel} runId={sel} />}
+            </div>
+          )}
+        </>
       )}</Async>
     </div>
   );
 }
 
+// 필터바 — 텍스트/셀렉트 드래프트를 "검색"으로 일괄 적용(키스트로크 refetch 방지).
+// filter prop 변경(칩 제거·초기화·페이지) 시에만 드래프트 재동기 → 입력 중 clobber 없음.
+function FilterBar({ filter, onApply }: { filter: RunsFilter; onApply: (f: RunsFilter) => void }) {
+  const [draft, setDraft] = useState<RunsFilter>(filter);
+  useEffect(() => { setDraft(filter); }, [filter]);
+  const set = (k: ChipField, v: string) => setDraft(setField(draft, k, v));
+  // ISO(offset) ↔ datetime-local(YYYY-MM-DDTHH:mm) 표시 왕복.
+  const toLocal = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const submit = (e: React.FormEvent) => { e.preventDefault(); onApply({ ...draft, offset: 0 }); };
+  return (
+    <form className="filterbar" onSubmit={submit}>
+      <label>상태
+        <select value={draft.state ?? ""} onChange={(e) => set("state", e.target.value)}>
+          <option value="">전체</option>
+          {RUN_STATES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </label>
+      <label>런타임
+        <select value={draft.runtime ?? ""} onChange={(e) => set("runtime", e.target.value)}>
+          <option value="">전체</option>
+          {RUNTIMES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </label>
+      <label>모드<input value={draft.mode ?? ""} maxLength={40} onChange={(e) => set("mode", e.target.value)} /></label>
+      <label>에이전트<input value={draft.agent ?? ""} maxLength={120} onChange={(e) => set("agent", e.target.value)} /></label>
+      <label>기록 시각(파일시스템) 이후<input type="datetime-local" value={toLocal(draft.from)} onChange={(e) => set("from", e.target.value ? new Date(e.target.value).toISOString() : "")} /></label>
+      <label>기록 시각(파일시스템) 이전<input type="datetime-local" value={toLocal(draft.to)} onChange={(e) => set("to", e.target.value ? new Date(e.target.value).toISOString() : "")} /></label>
+      <label className="grow">검색어<input value={draft.q ?? ""} maxLength={200} placeholder="목표·모드·에이전트·요청자" onChange={(e) => set("q", e.target.value)} /></label>
+      <label>정렬
+        <select value={draft.sort} onChange={(e) => setDraft({ ...draft, sort: e.target.value as RunsFilter["sort"], offset: 0 })}>
+          {SORT_OPTS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+        </select>
+      </label>
+      <button type="button" className="order-toggle" aria-label={`정렬 방향 — 현재 ${draft.order === "desc" ? "내림차순" : "오름차순"}`}
+        onClick={() => setDraft(toggleOrder(draft))}>
+        {draft.order === "desc" ? "↓ 내림차순" : "↑ 오름차순"}
+      </button>
+      <button type="submit">검색</button>
+    </form>
+  );
+}
+
+// 결과 카운트·절단 고지·mtime 비결정 고지·페이지네이션.
+function ResultBar({ data, onPage }: { data: RunsQueryResult; onPage: (offset: number) => void }) {
+  const range = pageRange(data);
+  const notice = truncationNotice(data.truncatedReason);
+  // 페이지 이동은 서버가 실제 적용한 offset/limit(clamp된) 기준 — 클라 filter.limit 로 오점프 방지.
+  const prevDisabled = data.offset <= 0;
+  const nextDisabled = !data.hasMore;
+  return (
+    <div className="resultbar">
+      <div className="result-meta">
+        <span className="count">총 {data.total}건{range && <span className="muted"> · {range.start}–{range.end} 표시</span>}</span>
+        {notice && (
+          <span className="trunc-warn" role="note" title={notice.tip}>
+            ⚠ {notice.label} <span className="muted">— {notice.tip}</span>
+          </span>
+        )}
+        {data.recordedAtSource === "mtime" && (
+          <span className="src-note muted" title="birthtime 미지원 파일시스템 — mtime(최근 상태갱신) 기준. 정렬·기간이 비결정적일 수 있음.">
+            ⓘ 기록 시각 = mtime(정렬 비결정 가능)
+          </span>
+        )}
+      </div>
+      <div className="pager">
+        <button disabled={prevDisabled} aria-label="이전 페이지" onClick={() => onPage(prevOffset(data))}>◂ 이전</button>
+        <button disabled={nextDisabled} aria-label="다음 페이지" onClick={() => onPage(nextOffset(data))}>다음 ▸</button>
+      </div>
+    </div>
+  );
+}
+
+// events 응답(서버 계약 readEvents: { items, nextAfter, hasMore, runState, schemaVersion }) → 표시 행(최근 30건).
+// 서버 Event 스키마 필드는 `event`(≠ 구 `type`). 계약 미러 — shape 회귀 방지(테스트 고정).
+export function runEventRows(e: { items: Array<{ seq: number; event: string; message?: string }> }): Array<{ seq: number; event: string; message: string }> {
+  return e.items.slice(-30).map((x) => ({ seq: x.seq, event: x.event, message: x.message ?? "" }));
+}
+
 function RunDetail({ runId }: { runId: string }) {
   const run = useApi<{ manifest: unknown; status: { state: string; exitCode: number | null; error: string | null } | null }>(`/api/runs/${encodeURIComponent(runId)}`);
-  const ev = useApi<{ events: Array<{ seq: number; type: string; message?: string }> }>(`/api/runs/${encodeURIComponent(runId)}/events`);
+  const ev = useApi<{ items: Array<{ seq: number; event: string; message?: string }>; nextAfter: number; hasMore: boolean; runState: string | null; schemaVersion: string }>(`/api/runs/${encodeURIComponent(runId)}/events`);
   const ag = useApi<{ agents: Array<{ name: string; state: string }> }>(`/api/runs/${encodeURIComponent(runId)}/agents`);
   const arts = useApi<{ files: string[] }>(`/api/runs/${encodeURIComponent(runId)}/artifacts`);
   const [art, setArt] = useState<string>("");
@@ -182,11 +317,11 @@ function RunDetail({ runId }: { runId: string }) {
         <p>상태: {r.status ? <Badge kind={r.status.state === "completed" ? "ok" : r.status.state === "failed" ? "err" : "muted"}>{r.status.state}</Badge> : "무효"} {r.status?.exitCode != null && `· exit ${r.status.exitCode}`}{r.status?.error && <span className="error"> · {r.status.error}</span>}</p>
       )}</Async>
       <Async state={ag}>{(a) => a.agents.length > 0 ? <Table cols={["에이전트", "상태"]} rows={a.agents.map((x) => [x.name, x.state])} /> : <p className="muted">에이전트 상태 없음</p>}</Async>
-      <Async state={ev}>{(e) => (
-        <div className="events">{e.events.length === 0 ? <p className="muted">이벤트 없음</p> : e.events.slice(-30).map((x) => (
-          <div key={x.seq} className="evline"><span className="seq">#{x.seq}</span> <b>{x.type}</b> {x.message ?? ""}</div>
+      <Async state={ev}>{(e) => { const rows = runEventRows(e); return (
+        <div className="events">{rows.length === 0 ? <p className="muted">이벤트 없음</p> : rows.map((x) => (
+          <div key={x.seq} className="evline"><span className="seq">#{x.seq}</span> <b>{x.event}</b> {x.message}</div>
         ))}</div>
-      )}</Async>
+      ); }}</Async>
       <Async state={arts}>{(f) => f.files.length > 0 ? (
         <div>
           <p className="muted">산출물:</p>

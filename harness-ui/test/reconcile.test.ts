@@ -17,7 +17,7 @@ const isWin = process.platform === "win32";
 
 const manifest = (runId: string): Manifest => ({
   schemaVersion: "1", runId, projectRoot: "/x", runtime: "codex", mode: "build",
-  createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "t", goal: "g", agents: [],
+  createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "t", goal: "g", agents: [], agent: null,
   targets: [], permissionMode: "read-only", model: "default", supervisorVersion: SUPERVISOR_VERSION,
 });
 const runningStatus = (runId: string): Status => ({

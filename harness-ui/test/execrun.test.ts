@@ -61,7 +61,7 @@ describe("launch (A9b dry-run·실행)", () => {
     const root = await mkdtemp(join(tmpdir(), "hui-run5-"));
     const { superviseRun, writeManifest, writeStatus, SUPERVISOR_VERSION } = await import("../src/server/supervisor/supervisor.js");
     const runDir = join(root, "_workspace", "runs", "run-x");
-    await writeManifest(runDir, { schemaVersion: "1", runId: "run-x", projectRoot: root, runtime: "codex", mode: "build", createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "t", goal: "g", agents: [], targets: [], permissionMode: "read-only", model: "default", supervisorVersion: SUPERVISOR_VERSION });
+    await writeManifest(runDir, { schemaVersion: "1", runId: "run-x", projectRoot: root, runtime: "codex", mode: "build", createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "t", goal: "g", agents: [], agent: null, targets: [], permissionMode: "read-only", model: "default", supervisorVersion: SUPERVISOR_VERSION });
     await writeStatus(runDir, { schemaVersion: "1", runId: "run-x", state: "queued", phase: "", progress: 0, updatedAt: "2026-07-09T10:00:00+09:00", heartbeatAt: "2026-07-09T10:00:00+09:00", serverPid: 1, serverStartTime: "", childPid: null, childStartTime: null, childProcessGroupId: null, exitCode: null, exitSignal: null, cancelRequestedAt: null, stateReason: null, summary: "", error: null });
     // 실 codex 대신 node 로 JSONL 방출 후 종료. superviseRun 이 exit 감지→최종 ingest→terminal status.
     await superviseRun(runDir, process.execPath, ["-e", `process.stdout.write(JSON.stringify({ts:new Date().toISOString(),level:"info",event:"agent_completed",agent:"builder",phase:"P1",state:"completed",progress:100})+"\\n")`]);

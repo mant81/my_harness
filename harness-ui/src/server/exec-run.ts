@@ -44,7 +44,7 @@ function manifest(runId: string, projectRoot: string, req: RunRequest): Manifest
   return {
     schemaVersion: "1", runId, projectRoot, runtime: req.runtime, mode: req.mode,
     createdAt: new Date().toISOString(), requestedBy: "local-user", goal: req.domain.slice(0, 200),
-    agents: [], targets: req.targets, permissionMode: req.permissionMode, model: req.model, supervisorVersion: SUPERVISOR_VERSION,
+    agents: [], agent: null, targets: req.targets, permissionMode: req.permissionMode, model: req.model, supervisorVersion: SUPERVISOR_VERSION,
   };
 }
 

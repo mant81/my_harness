@@ -1,5 +1,6 @@
 // 상태 스키마 정본 (설계 §5). schema-valid = 아래 Zod `.parse()` 통과.
 import { z } from "zod";
+import { SAFE_SEGMENT } from "./lib/paths.js";
 
 export const RunState = z.enum([
   "queued", "running", "blocked", "failed", "completed", "cancelled", "stale",
@@ -21,6 +22,9 @@ export const Manifest = z.object({
   requestedBy: z.string(),
   goal: z.string(),
   agents: z.array(z.string()),
+  // M7 S1: additive optional 단수 `agent`(단일 대상 귀속 태그). read/파싱 측만 —
+  // writer(supervisor)는 M10. 구 manifest(agent 없음)→null 파싱(거부 아님). SAFE_SEGMENT 위반은 parse 실패.
+  agent: z.string().regex(SAFE_SEGMENT).nullable().default(null),
   targets: z.array(z.string()),
   permissionMode: z.string(),
   model: z.string(),
@@ -94,6 +98,41 @@ export const DriftFinding = z.object({
   suggestedAction: z.string(),
 });
 export type DriftFinding = z.infer<typeof DriftFinding>;
+
+// --- M7 F4: GET /api/runs 고급 조회 쿼리 (설계 §F4.3) ---------------------
+// offset/limit는 clamp(400 아님) — enum/datetime/SAFE_SEGMENT 위반만 400.
+// [정본 정정] 설계서 §F4.3 line66은 `z.max(100)`(거부)로 적혀 clamp 요구(A48·R-4)와 충돌 →
+// 아래처럼 z.preprocess로 경계 clamp 후 int 검증(server-builder 보고).
+function coerceInt(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (/^-?\d+$/.test(s)) return Number.parseInt(s, 10);
+  }
+  return null; // 비수치(limit=abc 등) → fallback default
+}
+function clampInt(n: number | null, min: number, max: number, fallback: number): number {
+  if (n === null) return fallback;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}
+
+export const RunsQuery = z.object({
+  state: RunState.optional(),
+  runtime: Runtime.optional(),
+  mode: z.string().max(40).optional(),
+  agent: z.string().regex(SAFE_SEGMENT).max(120).optional(),
+  from: z.string().datetime({ offset: true }).optional(),
+  to: z.string().datetime({ offset: true }).optional(),
+  q: z.string().max(200).optional(),
+  sort: z.enum(["recordedAt", "updatedAt", "state"]).default("recordedAt"),
+  order: z.enum(["asc", "desc"]).default("desc"),
+  // 범위 밖 → clamp(400 아님): limit 99999→100·0→1·-5→1·abc→50 / offset -5→0·초과→100000·abc→0
+  limit: z.preprocess((v) => clampInt(coerceInt(v), 1, 100, 50), z.number().int().min(1).max(100)),
+  offset: z.preprocess((v) => clampInt(coerceInt(v), 0, 100000, 0), z.number().int().min(0).max(100000)),
+});
+export type RunsQuery = z.infer<typeof RunsQuery>;
 
 // schema-valid 헬퍼: parse 성공 여부 + 사유.
 export function isSchemaValid<T>(schema: z.ZodType<T>, data: unknown): { ok: true; value: T } | { ok: false; error: string } {

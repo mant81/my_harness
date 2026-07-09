@@ -5,9 +5,10 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { detectRuntimes } from "../adapters/runtime.js";
 import { harnessInventory, readAgents, readSkills } from "../adapters/harness.js";
-import { listRuns, getRun, readEvents, readRunAgents } from "../adapters/runs.js";
+import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapters/runs.js";
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
+import { RunsQuery } from "../schemas.js";
 import { isSafeSegment, isWithinRoot } from "../lib/paths.js";
 import { deniedPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
@@ -38,7 +39,14 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
     return found ?? reply.code(404).send({ error: "not-found" });
   });
 
-  app.get("/api/runs", async () => listRuns(projectRoot));
+  // 무인자(raw 쿼리 부재) → 기존 listRuns({runs} 계약 불변). 인자 → RunsQuery 검증 후 queryRuns.
+  // presence 판단은 Zod default 적용 前 raw 쿼리로(default가 무인자를 인자로 오판 방지).
+  app.get<{ Querystring: Record<string, unknown> }>("/api/runs", async (req, reply) => {
+    if (Object.keys(req.query ?? {}).length === 0) return listRuns(projectRoot);
+    const parsed = RunsQuery.safeParse(req.query);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid-query", detail: parsed.error.issues });
+    return queryRuns(projectRoot, parsed.data);
+  });
   app.get<{ Params: { runId: string } }>("/api/runs/:runId", async (req, reply) => {
     const r = await getRun(projectRoot, req.params.runId);
     return r ?? reply.code(404).send({ error: "not-found" });

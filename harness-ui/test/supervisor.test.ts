@@ -12,7 +12,7 @@ let stateDir: string;
 
 const manifest = (runId: string): Manifest => ({
   schemaVersion: "1", runId, projectRoot: "/x", runtime: "codex", mode: "build",
-  createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "test", goal: "g", agents: [],
+  createdAt: "2026-07-09T10:00:00+09:00", requestedBy: "test", goal: "g", agents: [], agent: null,
   targets: [], permissionMode: "read-only", model: "default", supervisorVersion: SUPERVISOR_VERSION,
 });
 const raw = (o: object) => JSON.stringify({ ts: "2026-07-09T10:00:00+09:00", level: "info", event: "x", ...o }) + "\n";
