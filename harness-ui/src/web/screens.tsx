@@ -1,6 +1,6 @@
 // 9화면(§IA: Overview·Build·Agents·Skills·Runs·Docs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
 // XSS: 전 텍스트 React escape. dangerouslySetInnerHTML 는 오직 renderMarkdown(markdown-it html:false + DOMPurify) 통과분에만(F5 DV8).
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useApi, Async, Badge, Card, Table, ConfBadge, MetricCell } from "./ui.js";
 import {
   type OverviewMetrics, type AgentsMetrics, type SkillsMetrics, type Coverage,
@@ -9,8 +9,11 @@ import {
 import {
   apiPost, fetchArtifact, downloadDoc, downloadArtifact,
   encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
+  postProjectRoot, ProjectRootError, cancelActiveRuns,
   type DocsNode, type DocsTree, type DocPreview,
+  type SettingsInfo, type ProjectRootPreview,
 } from "./api.js";
+import { projectRootErrorText, canSave, requiresOrphanChoice, type OrphanChoice } from "./settings.js";
 import {
   type RunTemplate, type RunSubmitResult,
   toggleSelected, runSubmitErrorText, focusRunFromHash, runsDeepLink,
@@ -802,20 +805,190 @@ export function Ops() {
   );
 }
 
-// ── 8. Settings ──
+// ── A85/A99 확인 다이얼로그(A92 — 포커스 트랩·ESC·키보드) ──
+// projectRoot 변경 = 비가역 config 쓰기이므로 dryRun 프리뷰 후 명시 확인 게이트. 취소 시 어떤 쓰기도 안 함(A101).
+function ConfirmDialog({ title, onCancel, children }: { title: string; onCancel: () => void; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const focusables = () => Array.from(
+      box.querySelectorAll<HTMLElement>('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')
+    ).filter((x) => !x.hasAttribute("disabled") && x.tabIndex !== -1);
+    focusables()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); onCancel(); return; }
+      if (e.key !== "Tab") return;
+      const f = focusables();
+      const first = f[0], last = f[f.length - 1];
+      if (!first || !last) return;
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    box.addEventListener("keydown", onKey);
+    return () => box.removeEventListener("keydown", onKey);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cfm-title" ref={ref}>
+        <h3 id="cfm-title">{title}</h3>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ── 8. Settings (F3 M11 — projectRoot 편집·A68~A71·A85·A94·A97·A99·A101) ──
 export function Settings() {
-  const st = useApi<{ projectRoot: string; mutationEnabled: boolean }>("/api/settings");
+  const st = useApi<SettingsInfo>("/api/settings");
   return (
     <div className="screen">
       <h2>Settings</h2>
-      <Async state={st}>{(s) => (
-        <Card title="설정 (조회 전용)">
-          <Table cols={["항목", "값"]} rows={[
-            ["projectRoot", s.projectRoot],
-            ["파일수정 API", s.mutationEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성(v0.5)</Badge>],
-          ]} />
-        </Card>
-      )}</Async>
+      {/* A83: 현재값·편집폼이 하나의 3-state 로 — 조회 실패가 화면 전체를 무너뜨리지 않음 */}
+      <Async state={st}>{(s) => <SettingsBody info={s} onSaved={st.reload} />}</Async>
     </div>
+  );
+}
+
+function SettingsBody({ info, onSaved }: { info: SettingsInfo; onSaved: () => void }) {
+  const [path, setPath] = useState("");
+  const [preview, setPreview] = useState<ProjectRootPreview | null>(null); // dryRun 프리뷰(확인 다이얼로그 오픈 트리거)
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);   // 검증(dryRun) 인라인 에러
+  const [savedAt, setSavedAt] = useState<string | null>(null); // 저장 성공 토스트
+
+  const provisioned = info.projectsHomeProvisioned;
+
+  // "검증" → dryRun:true 프리뷰(디스크 미변경). 성공 시 확인 다이얼로그 오픈. 400/409 → 한국어 인라인(A5).
+  const doValidate = async () => {
+    setBusy(true); setErr(null); setSavedAt(null); setPreview(null);
+    try {
+      const r = await postProjectRoot(path.trim(), true);
+      if ("ok" in r) setPreview(r); // dryRun 응답(written:false)
+    } catch (e) {
+      if (e instanceof ProjectRootError) setErr(projectRootErrorText(e.code, e.status));
+      else setErr(String(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <>
+      <Card title="설정">
+        <Table cols={["항목", "값"]} rows={[
+          ["projectRoot (현재 유효값)", <code className="path">{info.projectRoot}</code>],
+          ["projectsHome (경계)", info.projectsHome ? <code className="path">{info.projectsHome}</code> : <Badge kind="warn">미설정</Badge>],
+          ["정의 편집(F7)", info.definitionEditEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성</Badge>],
+          ["파일수정 API", info.mutationEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성(조회 전용)</Badge>],
+        ]} />
+      </Card>
+
+      {/* W-D/A97: 미프로비저닝 → 편집 폼 비활성 + 정확한 프로비저닝 액션(데드엔드 방지) */}
+      {!provisioned ? (
+        <Card title="projectRoot 편집 (사용 불가)">
+          <div className="banner warn" role="note">
+            <p>⚠ 프로젝트 경계가 아직 프로비저닝되지 않았습니다.</p>
+            <p className="muted">
+              편집을 활성화하려면 <code className="path">HARNESS_PROJECTS_HOME</code> 환경변수로 프로젝트 경계를 지정하고 서버를 재시작하세요.
+            </p>
+            {info.projectsHome && (
+              <p className="muted">감지된 경로 후보: <code className="path">{info.projectsHome}</code></p>
+            )}
+          </div>
+          <fieldset className="form" disabled aria-disabled="true">
+            <label className="full">프로젝트 루트 경로
+              <input value="" placeholder="경계 프로비저닝 후 사용 가능" readOnly />
+            </label>
+          </fieldset>
+        </Card>
+      ) : (
+        <Card title="projectRoot 편집 (A71 · 재시작 후 반영)">
+          <div className="form">
+            <label className="full">새 프로젝트 루트 경로 (절대경로)
+              <input value={path} onChange={(e) => { setPath(e.target.value); setErr(null); }}
+                placeholder={info.projectsHome ? `${info.projectsHome}/…` : "/absolute/path/to/project"}
+                aria-invalid={err ? "true" : undefined} maxLength={4096} spellCheck={false} />
+            </label>
+            <p className="muted full">경계(projectsHome) 하위의 하네스 디렉토리만 허용됩니다 · 검증(미리보기) 후 확인해야 저장됩니다(디스크 미변경).</p>
+            <button className="primary" disabled={busy || !path.trim()} onClick={doValidate}>
+              {busy && !preview ? "검증 중…" : "검증 (미리보기)"}
+            </button>
+          </div>
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+          {savedAt && (
+            <p className="banner ok" role="status">✓ 저장됨 · 재시작 후 반영됩니다 ({savedAt.slice(0, 19)})</p>
+          )}
+        </Card>
+      )}
+
+      {/* A85/A99/A101: dryRun 프리뷰 확인 다이얼로그 → "저장"=dryRun:false 쓰기. 취소 시 어떤 쓰기도 안 함 */}
+      {preview && (
+        <ProjectRootConfirm
+          path={path.trim()}
+          preview={preview}
+          onCancel={() => setPreview(null)}
+          onSaved={(appliedAt) => { setPreview(null); setSavedAt(appliedAt); setPath(""); onSaved(); }}
+        />
+      )}
+    </>
+  );
+}
+
+// A85/A99/A101 확인 다이얼로그 — 프리뷰 결과 표시 + activeRunsWarning>0 시 2선택 + "저장"(dryRun:false).
+function ProjectRootConfirm({ path, preview, onCancel, onSaved }: {
+  path: string; preview: ProjectRootPreview; onCancel: () => void; onSaved: (appliedAt: string) => void;
+}) {
+  const warn = preview.activeRunsWarning;
+  const [choice, setChoice] = useState<OrphanChoice | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const doSave = async () => {
+    setBusy(true); setErr(null);
+    try {
+      // A99 (a): 활성 run 취소 후 재시작(cancel 경로 재사용) → 그다음 실제 쓰기.
+      if (choice === "cancel-first") await cancelActiveRuns();
+      const r = await postProjectRoot(path, false); // dryRun:false = 실제 config 쓰기
+      if ("accepted" in r) onSaved(r.appliedAt);
+    } catch (e) {
+      if (e instanceof ProjectRootError) setErr(projectRootErrorText(e.code, e.status));
+      else setErr(String(e));
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <ConfirmDialog title="프로젝트 루트 변경 확인" onCancel={onCancel}>
+      <p className="muted">아래 경로로 <b>config 를 변경</b>합니다. 이 변경은 <b>서버 재시작 후</b> 반영됩니다(라이브 재바인딩 아님).</p>
+      <Table cols={["항목", "값"]} rows={[
+        ["적용될 유효 루트", <code className="path">{preview.effectiveRoot}</code>],
+        ["재시작 필요", "예 (requiresRestart)"],
+        ["활성 run", warn > 0 ? <Badge kind="warn">{warn}건</Badge> : <Badge kind="ok">없음</Badge>],
+      ]} />
+
+      {/* W-B1/A99: activeRunsWarning>0 일 때만 2선택 명시(과경고 금지) */}
+      {requiresOrphanChoice(warn) && (
+        <fieldset className="form" style={{ marginTop: 12 }}>
+          <legend>활성 run 처리 (A99 · 명시 선택 필요)</legend>
+          <label className="check">
+            <input type="radio" name="orphan" checked={choice === "cancel-first"}
+              onChange={() => setChoice("cancel-first")} />
+            활성 run 취소 후 재시작 (통제 유지 · 진행 중 {warn}건을 취소)
+          </label>
+          <label className="check">
+            <input type="radio" name="orphan" checked={choice === "headless-continue"}
+              onChange={() => setChoice("headless-continue")} />
+            헤드리스 계속 승인 (⚠ 통제 상실 · 재시작 후에도 계속 실행되어 API 토큰이 소진될 수 있음)
+          </label>
+        </fieldset>
+      )}
+
+      {err && <p className="banner err" role="alert">⚠ {err}</p>}
+
+      <div className="modal-actions">
+        <button onClick={onCancel} disabled={busy}>취소 (변경 없음)</button>
+        <button className="primary" disabled={busy || !canSave(warn, choice)} onClick={doSave}>
+          {busy ? "저장 중…" : "저장 (config 쓰기)"}
+        </button>
+      </div>
+    </ConfirmDialog>
   );
 }

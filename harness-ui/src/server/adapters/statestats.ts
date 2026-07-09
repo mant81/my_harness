@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { readdir, stat, lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { readAgents, readSkills } from "./harness.js";
+import { loadConfigFromDisk, projectsHomeFromEnv } from "../lib/config.js";
 
 const MAX_DOCS = 1000;        // 프로젝트당 결과서 스캔 상한
 const MAX_DOC_BYTES = 262144; // 파일당 read 상한(256KB)
@@ -89,10 +90,17 @@ export async function stateStats(root: string) {
   return { configHealth, d4, update, evolution };
 }
 
+// A94/A97/A101 확장(F3). 신뢰경계 = env SSOT(HARNESS_PROJECTS_HOME). 미설정 = 미프로비저닝(편집 비활성).
+//   projectRoot = 부팅 검증 통과한 effectiveRoot(주입). config.projectsHome 은 read-only 힌트(표시용 폴백만).
 export async function settings(root: string) {
+  const envHome = projectsHomeFromEnv();
+  const config = await loadConfigFromDisk();
   return {
-    projectRoot: root,
-    mutationEnabled: false, // v0.5 파일수정 API 비활성
+    projectRoot: root,                                   // effectiveRoot(주입·재바인딩 없음)
+    projectsHome: envHome ?? config.projectsHome ?? null, // 표시용: env 우선, config 힌트 폴백
+    projectsHomeProvisioned: envHome !== null,           // 경계 프로비저닝 여부(env SSOT 기준)
+    definitionEditEnabled: config.definitionEditEnabled, // F7 게이트(불변 false 기본)
+    mutationEnabled: false,                              // 전면 파일수정 API 불변 비활성
     // CLI 경로/기본모델/sandbox 는 /api/runtimes·환경에서. 여기선 조회만.
   };
 }

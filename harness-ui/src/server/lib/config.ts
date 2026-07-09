@@ -1,0 +1,161 @@
+// F3.7 공유 config 서브시스템 (M11 · F7/F8 세 writer 공유 기반). 전량 신규(PV1 확정).
+// 버전드 봉투 Config_v06 + per-leaf 독립 safeParse 복구 + 원자 RMW + in-process 뮤텍스.
+// 신뢰경계(projectsHome)는 env SSOT(HARNESS_PROJECTS_HOME) — config.projectsHome 는 read-only 힌트/폴백만
+//   (RMW 대상 아님·경계 판정 미사용). writeJsonAtomic(atomic.ts) 재사용(신규 쓰기루틴 금지).
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
+import { stateHome } from "./paths.js";
+import { writeJsonAtomic } from "./atomic.js";
+
+export const CONFIG_SCHEMA_VERSION = "1" as const;
+const MAX_CONFIG_BYTES = 262144; // config.json 개별 크기 상한(256KB·OOM 방어)
+
+export interface Config_v06 {
+  schemaVersion: "1";
+  projectsHome: string | null;       // read-only 힌트/폴백만(경계 SSOT 아님 — env HARNESS_PROJECTS_HOME 가 SSOT).
+  projectRoot: string | null;        // 편집 API 가 RMW 하는 유일 mutable 경로 필드.
+  definitionEditEnabled: boolean;    // F7 게이트(불변 기본 false·fail-closed).
+  evals: Record<string, unknown> | null; // F8 서브객체(M11 은 골격만·형제 보존 계약 확립).
+  [k: string]: unknown;              // root passthrough(미지/미래 필드 보존).
+}
+
+// evals per-leaf 골격(F8 이 채움). 알려진 잎만 독립 검증 — 한 잎 손상이 형제/미지 필드를 소거하지 않는다.
+const EVALS_LEAVES: Record<string, z.ZodTypeAny> = {
+  threshold: z.number(),
+  enabled: z.boolean(),
+};
+
+// evals 서브객체 per-leaf 복구: 통째 파싱해 clobber 금지(통합감사-#1). object 아님 → null(fail-closed 잎).
+//   알려진 잎이 타입 위반이면 그 잎만 null 로, 형제·미지 필드는 passthrough 보존.
+export function loadEvals(raw: unknown): Record<string, unknown> | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = { ...(raw as Record<string, unknown>) };
+  for (const [k, schema] of Object.entries(EVALS_LEAVES)) {
+    if (k in obj && !schema.safeParse(obj[k]).success) obj[k] = null; // 잎 독립 복구(형제 무영향)
+  }
+  return obj;
+}
+
+// 봉투 파싱 + per-leaf 독립 복구. 전체객체 strict Zod 금지(한 필드 손상이 타 필드 소거 방지).
+//   schemaVersion 이 존재하고 "1" 이 아니면 throw(미지원 스키마 — 조용한 다운그레이드 금지).
+export function loadConfig(raw: unknown): Config_v06 {
+  const obj: Record<string, unknown> =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw) ? { ...(raw as Record<string, unknown>) } : {};
+  const sv = obj.schemaVersion;
+  if (sv !== undefined && sv !== CONFIG_SCHEMA_VERSION) throw new Error("unsupported-config-schema");
+  const strLeaf = (v: unknown): string | null => {
+    const p = z.string().safeParse(v);
+    return p.success ? p.data : null;
+  };
+  return {
+    ...obj, // 미지/미래 필드 passthrough 보존
+    schemaVersion: CONFIG_SCHEMA_VERSION,
+    projectsHome: strLeaf(obj.projectsHome),
+    projectRoot: strLeaf(obj.projectRoot),
+    definitionEditEnabled: z.boolean().safeParse(obj.definitionEditEnabled).success
+      ? (obj.definitionEditEnabled as boolean)
+      : false, // fail-closed
+    evals: loadEvals(obj.evals),
+  };
+}
+
+export function configPath(): string {
+  return join(stateHome(), "config.json");
+}
+
+// 신뢰경계 SSOT — env HARNESS_PROJECTS_HOME. 미설정 = 미프로비저닝(편집 비활성). config.projectsHome 미사용.
+export function projectsHomeFromEnv(): string | null {
+  const v = process.env.HARNESS_PROJECTS_HOME;
+  return v && v.length > 0 ? v : null;
+}
+
+// 디스크 원문 read(크기상한·O_NOFOLLOW). 두 컨텍스트 분리(R2 HIGH#1·R5 HIGH):
+//   - strict=false(부팅/조회): 부재/빈/파손 JSON·판독불가 → {}(loadConfig fallback·throw 아님·읽기 안전 기본값).
+//   - strict=true(RMW 쓰기 전 read): 기존 파일이 구문 손상(JSON.parse 실패)·판독불가(EACCES/EPERM/ELOOP/
+//     ENOTDIR/EISDIR·심링크 O_NOFOLLOW)·과대 → 조용히 {} 로 대체하지 않고 throw(fail-fast). 판독불가·손상
+//     기존 config 를 projectRoot 만 있는 유효 데이터로 덮어쓰는 영구 소실 차단.
+//     오직 부재(ENOENT)만 손상이 아니라 정당한 신선 시작이므로 strict 여도 {}(정상 write 허용).
+//   unsupported-schema 만 loadConfig 가 throw(파싱 성공 후 판정).
+async function readConfigRaw(strict = false): Promise<unknown> {
+  let fh;
+  try {
+    fh = await open(configPath(), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return {}; // 부재=정당한 신선 시작(손상 아님 · strict 여도 write 허용)
+    // 그 외 open 실패(EACCES/EPERM/ELOOP/ENOTDIR/EISDIR·심링크 O_NOFOLLOW 등)=기존 config 비정상 상태.
+    if (strict) throw err; // RMW: 판독불가 기존 config 를 유효분으로 덮지 않도록 fail-fast(교체 차단)
+    return {}; // 관용 조회: 안전 기본값(쓰기 아님)
+  }
+  try {
+    const st = await fh.stat();
+    if (!st.isFile()) {
+      if (strict) throw new Error("config-read-not-a-file"); // RMW: 비정규 파일 덮어쓰기 금지
+      return {};
+    }
+    if (st.size > MAX_CONFIG_BYTES) {
+      if (strict) throw new Error("config-read-too-large");  // RMW: 과대 기존 파일 덮어쓰기 금지
+      return {};
+    }
+    const n = Number(st.size);
+    if (n === 0) return {}; // 빈 파일 → 신선 시작(손상 아님)
+    const buf = Buffer.alloc(n);
+    const { bytesRead } = await fh.read(buf, 0, n, 0);
+    const text = buf.toString("utf8", 0, bytesRead);
+    try {
+      return JSON.parse(text);
+    } catch {
+      if (strict) throw new Error("config-corrupt-json"); // RMW: 구문 손상 → fail-fast(덮어쓰기 중단)
+      return {}; // 관용 read → fallback
+    }
+  } finally {
+    await fh.close().catch(() => {});
+  }
+}
+
+export async function loadConfigFromDisk(): Promise<Config_v06> {
+  return loadConfig(await readConfigRaw(false));
+}
+
+// RMW 전용 strict read — 손상(구문/판독불가) 기존 config 를 유효분으로 덮어쓰지 않도록 throw.
+//   유효 JSON 의 잘못된 필드값은 loadConfig 의 per-leaf 복구로 계속 처리(throw 아님).
+async function loadConfigFromDiskStrict(): Promise<Config_v06> {
+  return loadConfig(await readConfigRaw(true));
+}
+
+// in-process 뮤텍스(ingest locks 패턴) — 세 writer(F3/F7/F8) 직렬화. lost-update 차단.
+let writeChain: Promise<unknown> = Promise.resolve();
+export function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = writeChain.then(fn, fn); // 이전 실패와 무관하게 다음 실행(체인 끊김 방지)
+  writeChain = run.catch(() => {});
+  return run;
+}
+
+// RMW 대상 = mutable 필드만. projectsHome 는 patch 타입에서 원천 배제(env SSOT·read-only).
+export type ConfigPatch = Partial<Pick<Config_v06, "projectRoot" | "definitionEditEnabled" | "evals">>;
+
+// 원자 read-modify-validate-write: 뮤텍스 하 **단일** strict read → loadConfig(전 필드 복구) →
+//   해당 필드만 수정 → 전 필드 재직렬화 → writeJsonAtomic. 뮤텍스로 in-process 직렬화.
+//   R3 HIGH(agy · lost-update): 종전엔 strict read 를 2회(before + TOCTOU 재-read disk) 했으나 쓰기
+//   base 로 재-read 가 아닌 최초 before 기반 next 를 덮어써 두 read 사이 외부 변경을 무조건 유실했다.
+//   뮤텍스가 in-process 직렬화를 보장하므로 두 번째 read 는 무의미 I/O 였고 오히려 lost-update 원인.
+//   → 단일 read 기준 RMW 로 일관화(read→patch→write). cross-process lost-update(외부 프로세스 동시
+//   쓰기)는 out-of-scope — 로컬 단일사용자 전제, in-process 동시성만 뮤텍스로 방어.
+//   S-A2 [V9] projectsHome 불변 assert: patch 는 타입상 projectsHome 을 못 바꾸나(ConfigPatch 배제)
+//   next.projectsHome ≠ read 시점 값이면 write 중단·throw(경계 소스 오염 물리 차단·이중 방어) 유지.
+export async function updateConfig(patch: ConfigPatch): Promise<Config_v06> {
+  return withConfigLock(async () => {
+    const before = await loadConfigFromDiskStrict(); // 단일 strict read — 손상 config 는 여기서 throw
+    const next: Config_v06 = { ...before }; // 전 필드(미지 passthrough 포함) 보존
+    if ("projectRoot" in patch) next.projectRoot = patch.projectRoot ?? null;
+    if ("definitionEditEnabled" in patch) next.definitionEditEnabled = patch.definitionEditEnabled ?? false;
+    if ("evals" in patch) next.evals = patch.evals ?? null;
+    // S-A2 불변 assert: patch 경로가 projectsHome 을 바꾸지 않았음(타입상 불가하나 이중 방어).
+    if (next.projectsHome !== before.projectsHome) throw new Error("projectsHome-mutation-blocked");
+    await writeJsonAtomic(configPath(), next); // atomic.ts 재사용
+    return next;
+  });
+}

@@ -143,3 +143,75 @@ export async function fetchArtifact(runId: string, name: string): Promise<string
   if (!r.ok) throw new Error(`${r.status}`);
   return r.text();
 }
+
+// ── F3 Settings projectRoot 편집(M11) ──
+// 서버 확정 계약(server-builder 완료·이대로 소비):
+//   GET  /api/settings → { projectRoot, projectsHome:string|null, projectsHomeProvisioned:boolean, definitionEditEnabled:boolean, mutationEnabled:false }
+//   POST /api/settings/project-root (mutating·Host/Origin/token 게이트) body { path, dryRun?:boolean=false } (strict Zod·미지 필드 400)
+//     dryRun:true  → { ok:true, effectiveRoot, activeRunsWarning:number, requiresRestart:true, written:false }  (디스크 무변경)
+//     dryRun:false → { accepted:true, requiresRestart:true, effectiveRoot, appliedAt, activeRunsWarning }
+//     409 { error:"boundary-not-provisioned" } · 400 { error } (bad-input·symlink·reparse-point·denied-system-path·no-harness-marker·outside-projects-home·escape)
+export type SettingsInfo = {
+  projectRoot: string;
+  projectsHome: string | null;
+  projectsHomeProvisioned: boolean;
+  definitionEditEnabled: boolean;
+  mutationEnabled: false;
+};
+export type ProjectRootPreview = { ok: true; effectiveRoot: string; activeRunsWarning: number; requiresRestart: true; written: false };
+export type ProjectRootSaved = { accepted: true; requiresRestart: true; effectiveRoot: string; appliedAt: string; activeRunsWarning: number };
+
+// 400/409 거부를 구조 보존 승격(submitRun 패턴 동형) → UI 가 error 코드를 한국어로 매핑(A5·조용한 드롭 금지).
+export class ProjectRootError extends Error {
+  constructor(public readonly status: number, public readonly code: string) {
+    super(code);
+    this.name = "ProjectRootError";
+  }
+}
+
+// dryRun 프리뷰(true) / 실제 쓰기(false). 취소 시 UI 는 이 함수를 dryRun:false 로 호출하지 않음(A101 — 디스크 무변경).
+export async function postProjectRoot(path: string, dryRun: boolean): Promise<ProjectRootPreview | ProjectRootSaved> {
+  const r = await fetch("/api/settings/project-root", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify({ path, dryRun }),
+  });
+  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string }));
+    throw new ProjectRootError(r.status, String(d.error ?? r.status));
+  }
+  return r.json() as Promise<ProjectRootPreview | ProjectRootSaved>;
+}
+
+// A99 (a) 활성 run 취소 후 재시작 — 기존 cancel 경로 재사용(POST /api/runs/:id/cancel). running 상태 run 을 조회해 각각 취소.
+// 실패한 개별 취소는 삼키고 시도 수만 집계(부분 실패 격리·A83). 반환: 취소 시도 수.
+export async function cancelActiveRuns(): Promise<{ attempted: number; cancelled: number }> {
+  const res = await apiGet<{ items: Array<{ runId: string; state: string | null }> }>("/api/runs?state=running&limit=200");
+  const ids = res.items.map((x) => x.runId);
+  let cancelled = 0;
+  for (const id of ids) {
+    try { await apiPost(`/api/runs/${encodeURIComponent(id)}/cancel`, {}); cancelled++; } catch { /* 개별 취소 실패 격리 */ }
+  }
+  return { attempted: ids.length, cancelled };
+}
+
+// ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
+// healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
+// 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).
+export async function probeConnection(): Promise<
+  { healthOk: false } | { healthOk: true; authOk: true } | { healthOk: true; authOk: false; status: number }
+> {
+  try {
+    const h = await fetch("/healthz", { signal: AbortSignal.timeout(4000) });
+    if (!h.ok) return { healthOk: false };
+  } catch { return { healthOk: false }; }
+  // health up → 인증 확립 확인. 세션 없으면 401 취급(재인증 동선).
+  if (!getSession()) return { healthOk: true, authOk: false, status: 401 };
+  try {
+    const r = await fetch("/api/settings", { headers: authHeaders(), signal: AbortSignal.timeout(4000) });
+    if (r.status === 401) return { healthOk: true, authOk: false, status: 401 };
+    if (!r.ok) return { healthOk: true, authOk: false, status: r.status };
+    return { healthOk: true, authOk: true };
+  } catch { return { healthOk: false }; } // 인증 GET 자체가 네트워크 실패 → 재시작 진행 중 취급(offline)
+}

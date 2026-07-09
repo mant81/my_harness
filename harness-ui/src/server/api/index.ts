@@ -18,6 +18,20 @@ import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
 import { cancelRun } from "../supervisor/reconcile.js";
 import { join as pjoin } from "node:path";
+import { projectsHomeFromEnv, updateConfig } from "../lib/config.js";
+import { validateProjectRoot, revalidateForPersist } from "../lib/projectroot.js";
+
+// PV3: activeRunsWarning 산출. listRuns 재사용(신규 스캐너 금지) → status.json running 카운트.
+//   재시작 시 고아될 라이브 supervised run 판정(owner 레지스트리 cross-restart 는 미사용 — 열린질문 4).
+const ACTIVE_RUN_STATES = new Set<string>(["running"]);
+async function countActiveRuns(projectRoot: string): Promise<number> {
+  const { runs } = await listRuns(projectRoot);
+  return runs.filter((r) => {
+    if (!r.valid || !r.status || typeof r.status !== "object") return false;
+    const state = (r.status as { state?: unknown }).state;
+    return typeof state === "string" && ACTIVE_RUN_STATES.has(state);
+  }).length;
+}
 
 export function registerApi(app: FastifyInstance, projectRoot: string): void {
   app.get("/api/runtimes", async () => detectRuntimes());
@@ -155,6 +169,37 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   // overview 상태·통계(A35-A38) + settings
   app.get("/api/overview/state-stats", async () => stateStats(projectRoot));
   app.get("/api/settings", async () => settings(projectRoot));
+
+  // F3(M11·A68~A71·A99·A101): projectRoot 편집. **mutating** → security.ts onRequest 훅이 Host/Origin/token
+  //   자동 게이트(추가 배선 불요). config 만 쓰기(I8 예외·프로젝트 파일 무변경). 라이브 재바인딩 비목표(requiresRestart).
+  //   신뢰경계 = env SSOT(HARNESS_PROJECTS_HOME). 미프로비저닝 → 409 boundary-not-provisioned(편집 비활성).
+  const ProjectRootBody = z.object({
+    path: z.string().min(1).max(4096),
+    dryRun: z.boolean().optional().default(false),
+  }).strict();
+  app.post("/api/settings/project-root", async (req, reply) => {
+    const parsed = ProjectRootBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const { path: inputPath, dryRun } = parsed.data;
+    const projectsHome = projectsHomeFromEnv(); // env SSOT
+    if (!projectsHome) return reply.code(409).send({ error: "boundary-not-provisioned" });
+    // 공통 검증(양 모드): D1 → D4 → D3 → D2/D6 → D5.
+    const v = await validateProjectRoot(inputPath, projectsHome);
+    if (!v.ok) return reply.code(400).send({ error: v.error });
+    const activeRunsWarning = await countActiveRuns(projectRoot); // PV3: status.json running 카운트(listRuns 재사용)
+    if (dryRun) {
+      // 프리뷰: 디스크 미변경(취소 시 무변경·A101).
+      return { ok: true, effectiveRoot: v.effectiveRoot, activeRunsWarning, requiresRestart: true, written: false };
+    }
+    // 쓰기: D7 TOCTOU 재검증(지속 직전 realpath 재확인) → config RMW(projectRoot 만·타 필드 보존).
+    const v2 = await revalidateForPersist(inputPath, projectsHome, v.effectiveRoot);
+    if (!v2.ok) return reply.code(400).send({ error: v2.error });
+    await updateConfig({ projectRoot: v2.effectiveRoot });
+    return {
+      accepted: true, requiresRestart: true, effectiveRoot: v2.effectiveRoot,
+      appliedAt: new Date().toISOString(), activeRunsWarning,
+    };
+  });
 
   // ops status(A7·A8): 런타임 설치·버전 + usage=참조(TTY 제약).
   app.get("/api/ops/status", async () => {
