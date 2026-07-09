@@ -40,6 +40,21 @@ td { word-break:break-word; }
 .events { max-height:320px; overflow-y:auto; }
 .evline { padding:3px 0; border-bottom:1px solid var(--line); font-family:ui-monospace,monospace; font-size:12px; }
 .evline .seq { color:var(--muted); }
+/* U2 라이브 tail 인디케이터 */
+.events-panel { margin:8px 0; }
+.events-head { display:flex; gap:10px; align-items:center; margin-bottom:4px; font-size:12px; }
+.live-tag { color:var(--ok); font-weight:600; font-size:12px; }
+/* U3 메트릭 window 컨트롤 */
+.metric-window { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px; font-size:12px; }
+.metric-window-adv { font-size:12px; }
+.metric-window-adv summary { cursor:pointer; color:var(--muted); }
+.metric-window-adv label { display:inline-flex; flex-direction:column; gap:4px; margin-top:6px; }
+.metric-window-adv input { background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:5px 8px; font:inherit; width:120px; }
+/* U6 Docs 트리 필터 */
+.doc-filter { display:flex; gap:6px; align-items:center; margin-bottom:8px; font-size:13px; }
+.doc-filter input { flex:1; background:var(--bg); border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:6px 8px; font:inherit; }
+/* Part C 잠금 뷰 */
+.locked-config { display:flex; flex-direction:column; gap:10px; }
 
 /* F4 Runs 필터바·칩·결과·페이지 (A52/A88/A92) */
 .filterbar { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-end; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:12px; }

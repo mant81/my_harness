@@ -1,6 +1,7 @@
 // 공용 UI 프리미티브 — 로딩/에러/빈상태·데이터훅·테이블·배지. React 가 텍스트 escape(XSS 방어).
 import { useEffect, useState, useCallback } from "react";
 import { apiGet } from "./api.js";
+import { readErrorText } from "./errors.js"; // U1: GET 실패 → 한국어(원시 영문 노출 금지)
 import { confidenceMeta, formatMetricValue, type Confidence, type MetricValue, type MetricFmt } from "./metrics.js";
 
 // GET 데이터 훅 — 로딩/에러/재조회. path 변경 시 재요청.
@@ -16,15 +17,20 @@ export function useApi<T>(path: string | null): { data: T | null; err: string | 
     setData(null); setLoading(true); setErr(null); // path 변경 시 이전 data 클리어(stale 렌더 방지, agy R2)
     apiGet<T>(path)
       .then((d) => { if (live) { setData(d); setLoading(false); } })
-      .catch((e) => { if (live) { setErr(String(e)); setLoading(false); } });
+      .catch((e) => { if (live) { setErr(readErrorText(e)); setLoading(false); } }); // U1: 상태코드→한국어
     return () => { live = false; };
   }, [path, n]);
   return { data, err, loading, reload };
 }
 
+// A82/A83/A84: 로딩/에러(한국어+재시도)/빈 3-state. 에러는 개별 GET 실패 인라인(연결 끊김은 A94 전역 오버레이).
 export function Async<T>({ state, children }: { state: ReturnType<typeof useApi<T>>; children: (d: T) => React.ReactNode }) {
   if (state.loading && !state.data) return <div className="muted">불러오는 중…</div>;
-  if (state.err) return <div className="error">오류: {state.err}</div>;
+  if (state.err) return (
+    <div className="error" role="alert">
+      ⚠ {state.err} <button type="button" className="link" onClick={state.reload}>다시 시도</button>
+    </div>
+  );
   if (!state.data) return <div className="muted">데이터 없음</div>;
   return <>{children(state.data)}</>;
 }

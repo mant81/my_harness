@@ -174,6 +174,15 @@ describe("단계 전환·라벨(A108/A111)", () => {
   });
 });
 
+describe("정합: EvalsConfigResolved.adoptionStage 는 서버(1~4) 정합 — read 는 4(display-only 잠금) 수용", () => {
+  it("adoptionStage:4 인 resolved config 가 타입/런타임상 표현 가능(4 무선택 렌더 버그 방지 전제)", () => {
+    const locked: EvalsConfigResolved = { ...CFG, adoptionStage: 4, proposalsEnabled: false };
+    expect(locked.adoptionStage).toBe(4);
+    // write patch 는 여전히 1~3 만(고위험 확인은 3 전환만). 4 는 UI 폼에 도달하지 않음(부모가 LockedConfigView 분기).
+    expect(stageNeedsHighRiskConfirm(4, 3)).toBe(false);
+  });
+});
+
 const CFG: EvalsConfigResolved = {
   schemaVersion: "1", adoptionStage: 1, stage4Locked: true, proposalsEnabled: false,
   metrics: { alignment: { enabled: true, weight: 0.5 } },

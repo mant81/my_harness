@@ -10,7 +10,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:def-differential": "vitest run test/defedit.differential.test.ts"
+    "test:def-differential": "vitest run test/defedit.differential.test.ts",
+    "e2e": "tsx test/e2e.mjs"
   },
   "dependencies": {
     "@types/react": "^18.3.31",

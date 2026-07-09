@@ -1,5 +1,6 @@
 // F5 뷰어 순수 헬퍼(브레드크럼·렌더 판정·로컬 경로). UI 상태·shape 로직 → 단위 테스트 대상(TDD).
 // posix 경로만(서버 rel 은 항상 "/" 구분). 로컬 절대경로 표시는 A98(다운로드 413 시 "로컬에서 열기") 안내용.
+import type { DocsNode } from "./api.js";
 
 // 브레드크럼 — "design/spec.md" → [{name:"docs",path:""},{name:"design",path:"design"},{name:"spec.md",path:"design/spec.md"}].
 // 루트("docs") 항상 선두. 각 항목의 path 는 누적(클릭 시 트리 포커스용). 파일/디렉토리 무관.
@@ -39,4 +40,40 @@ export function viewerBanner(p: { renderable: boolean; binary: boolean }): Viewe
   if (!p.renderable) return "not-renderable";
   if (p.binary) return "binary";
   return null;
+}
+
+// ── U6 ?path= 딥링크(Runs ?run= 패턴 재사용) — 선택 파일 URL 반영·새로고침/공유 복원 ──
+// hash 의 `?path=<enc>` → rel 경로. 없으면 null. 예: "#/docs?path=design%2Fspec.md" → "design/spec.md".
+export function focusDocFromHash(hash: string): string | null {
+  const q = hash.split("?")[1];
+  if (!q) return null;
+  const path = new URLSearchParams(q).get("path");
+  return path && path.length > 0 ? path : null;
+}
+
+// 선택 파일 → Docs 딥링크 URL(hash 라우팅·경로 인코딩). null → 파라미터 없는 `#/docs`.
+export function docsDeepLink(rel: string | null): string {
+  return rel ? `#/docs?path=${encodeURIComponent(rel)}` : "#/docs";
+}
+
+// ── U6 트리 필터(간단·부분일치·대소문자 무시) — 매칭 파일 + 그 조상 디렉토리만 유지 ──
+// 순수 재귀 필터. query 공백/빈 → 원본 그대로. 매칭 없는 디렉토리는 제거(빈 트리 방지).
+export function filterDocTree(nodes: DocsNode[], query: string): DocsNode[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return nodes;
+  const walk = (list: DocsNode[]): DocsNode[] => {
+    const out: DocsNode[] = [];
+    for (const n of list) {
+      if (n.type === "file") {
+        if (n.name.toLowerCase().includes(q) || n.path.toLowerCase().includes(q)) out.push(n);
+      } else {
+        const kids = walk(n.children);
+        // 디렉토리명 자체가 매칭이면 하위 전체 유지, 아니면 매칭 하위만.
+        if (n.name.toLowerCase().includes(q)) out.push(n);
+        else if (kids.length > 0) out.push({ ...n, children: kids });
+      }
+    }
+    return out;
+  };
+  return walk(nodes);
 }

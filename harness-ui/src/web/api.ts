@@ -1,5 +1,7 @@
 // API 클라이언트 — session 토큰(Bearer) 첨부. 쿼리 토큰 금지(§0-VOID). XSS: 반환값은 React 가 escape.
 import type { RunSubmitResult } from "./agent-run.js";
+import { ApiGetError } from "./errors.js"; // U1: GET 실패 상태코드 보존(한국어 매핑용)
+export { ApiGetError } from "./errors.js";
 // 세션 단일 출처 = sessionStorage(모듈 인스턴스 분리·리로드에도 일관). getSession() 이 유일 판독기.
 const KEY = "harness-session";
 function getSession(): string | null { try { return sessionStorage.getItem(KEY); } catch { return null; } }
@@ -34,8 +36,8 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
 
 export async function apiGet<T = unknown>(path: string): Promise<T> {
   const r = await fetch(path, { headers: authHeaders() });
-  if (r.status === 401) { clearSession(); throw new Error(`401 인증 만료 — 런처 링크로 재접속`); } // stale 세션 폐기(무한 401 방지)
-  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, path); } // stale 세션 폐기(무한 401 방지)
+  if (!r.ok) throw new ApiGetError(r.status, path);                            // U1: 상태코드 보존 → 한국어 매핑
   return r.json() as Promise<T>;
 }
 
@@ -70,7 +72,9 @@ export async function submitRun(body: unknown): Promise<RunSubmitResult> {
     headers: authHeaders({ "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
-  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  // MED: 401 은 구조 보존(ApiGetError) 으로 승격 → readErrorText 가 세션 만료·재로그인 동선(A84)으로 매핑.
+  //   (구: 평문 Error → readErrorText 가 "네트워크 오류"로 오표시). clearSession 은 stale 세션 폐기 유지.
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, "/api/runs"); }
   if (!r.ok) {
     const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
     const detail = Array.isArray(d.detail) ? d.detail.map((x: unknown) => String(x)) : undefined;

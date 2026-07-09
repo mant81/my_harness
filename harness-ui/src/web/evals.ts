@@ -127,7 +127,8 @@ export interface MetricSetting { enabled: boolean; weight: number; }
 export interface ThresholdLeaf { value: number; floor: number; effective: number; }
 export interface EvalsConfigResolved {
   schemaVersion: "1";
-  adoptionStage: 1 | 2 | 3;
+  // read 는 4 수용(4 = display-only 잠금·서버 evalsconfig.ts 정합). write(EvalsConfigPatch)는 1~3 만.
+  adoptionStage: 1 | 2 | 3 | 4;
   stage4Locked: true;
   proposalsEnabled: boolean;
   metrics: Record<string, MetricSetting>;

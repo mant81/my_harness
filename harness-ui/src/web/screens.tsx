@@ -1,13 +1,13 @@
 // 9화면(§IA: Overview·Build·Agents·Skills·Runs·Docs·Drift·Ops·Settings). 모두 읽기(mutating=Build dry-run/실행·Drift sync-plan만).
 // XSS: 전 텍스트 React escape. dangerouslySetInnerHTML 는 오직 renderMarkdown(markdown-it html:false + DOMPurify) 통과분에만(F5 DV8).
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useApi, Async, Badge, Card, Table, ConfBadge, MetricCell } from "./ui.js";
 import {
   type OverviewMetrics, type AgentsMetrics, type SkillsMetrics, type Coverage,
   coverageSummary, coverageWindowText, truncatedReasonText, windowEmptyNotice, overviewSuggestions,
 } from "./metrics.js";
 import {
-  apiPost, fetchArtifact, downloadDoc, downloadArtifact,
+  apiPost, apiGet, fetchArtifact, downloadDoc, downloadArtifact,
   encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
   postProjectRoot, ProjectRootError, cancelActiveRuns,
   getDefinition, putDefinition, rollbackDefinition, setDefinitionEdit, DefEditError,
@@ -36,7 +36,16 @@ import {
   toggleSelected, runSubmitErrorText, focusRunFromHash, runsDeepLink,
 } from "./agent-run.js";
 import { renderMarkdown } from "./render.js";
-import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath } from "./docs-view.js";
+import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath, focusDocFromHash, docsDeepLink, filterDocTree } from "./docs-view.js";
+import { readErrorText } from "./errors.js";
+import {
+  tailDecision, isLiveRunState, isTerminalRunState,
+  nextEventCursor, mergeEventItems, nextTailDelayMs,
+} from "./run-tail.js";
+import {
+  type MetricsWindow, type WindowPreset, DEFAULT_WINDOW, PRESET_LABEL,
+  metricsPath, parseLimitInput,
+} from "./metrics-window.js";
 import {
   type RunsFilter, type RunsQueryResult, type ChipField,
   parseQuery, buildQuery, setField, clearField, clearAll, activeChips, hasActiveFilter,
@@ -69,11 +78,43 @@ function CoverageNote({ cov }: { cov: Coverage }) {
   );
 }
 
+// ── U3 메트릭 window 컨트롤 — 기간 프리셋(24h/7d/전체·FilterBar 패턴) + limit(고급·progressive disclosure) ──
+// coverage 의 windowNewest/Oldest 는 서버가 이 window 로 재산정 → CoverageNote 표기와 정합.
+function MetricsWindowBar({ win, onChange }: { win: MetricsWindow; onChange: (w: MetricsWindow) => void }) {
+  const presets: WindowPreset[] = ["24h", "7d", "all"];
+  const [limitDraft, setLimitDraft] = useState<string>(win.limit === null ? "" : String(win.limit));
+  useEffect(() => { setLimitDraft(win.limit === null ? "" : String(win.limit)); }, [win.limit]);
+  return (
+    <div className="metric-window" role="group" aria-label="관측 window 선택">
+      <span className="muted">관측 window:</span>
+      <div className="seg-toggle" role="group" aria-label="기간 프리셋">
+        {presets.map((p) => (
+          <button key={p} type="button" className={win.preset === p ? "on" : ""} aria-pressed={win.preset === p}
+            onClick={() => onChange({ ...win, preset: p })}>{PRESET_LABEL[p]}</button>
+        ))}
+      </div>
+      {/* A91 과밀 방지 — limit 은 고급 접기 */}
+      <details className="metric-window-adv">
+        <summary>고급</summary>
+        <label>집계 상한(limit)
+          <input type="number" min={1} inputMode="numeric" placeholder="전체" value={limitDraft}
+            aria-label="집계 편입 run 상한" onChange={(e) => setLimitDraft(e.target.value)}
+            onBlur={() => onChange({ ...win, limit: parseLimitInput(limitDraft) })} />
+        </label>
+      </details>
+    </div>
+  );
+}
+
 // W2 Overview 효과성 카드(A63·A91) — 독립 로딩(W9/A83: metrics/overview 실패가 Overview 전체 미붕괴).
 function EffectivenessCard() {
-  const m = useApi<OverviewMetrics>("/api/metrics/overview");
+  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
+  // U3: 경로는 window 변경 시에만 재계산 — nowMs 를 useMemo 안에서 캡처(deps:[win]) → 매 렌더 refetch 루프 방지.
+  const path = useMemo(() => metricsPath("/api/metrics/overview", win, Date.now()), [win]);
+  const m = useApi<OverviewMetrics>(path);
   return (
     <Card title="효과성 지표 (F6 · 계층 B · 관측 파생)">
+      <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => <OverviewMetricsBody m={d} />}</Async>
     </Card>
   );
@@ -115,9 +156,12 @@ function OverviewMetricsBody({ m }: { m: OverviewMetrics }) {
 
 // W3 Agents usage 섹션(A63) — 독립 로딩(W9). 토큰·호출·연결·선언≠관측 gap·미사용.
 function AgentsUsage() {
-  const m = useApi<AgentsMetrics>("/api/metrics/agents");
+  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
+  const path = useMemo(() => metricsPath("/api/metrics/agents", win, Date.now()), [win]);
+  const m = useApi<AgentsMetrics>(path);
   return (
     <Card title="활용도 (F6 · 관측 window)">
+      <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => (
         <>
           {d.agents.length === 0
@@ -140,9 +184,12 @@ function AgentsUsage() {
 
 // W4 Skills usage 섹션(A63) — 호출·점유(estimated 상한)·미사용 목록. 독립 로딩(W9).
 function SkillsUsage() {
-  const m = useApi<SkillsMetrics>("/api/metrics/skills");
+  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
+  const path = useMemo(() => metricsPath("/api/metrics/skills", win, Date.now()), [win]);
+  const m = useApi<SkillsMetrics>(path);
   return (
     <Card title="활용도 (F6 · 관측 window)">
+      <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => (
         <>
           {d.skills.length === 0
@@ -226,14 +273,20 @@ export function Build() {
   const [perm, setPerm] = useState<"read-only" | "workspace-write">("read-only");
   const [dry, setDry] = useState(true);
   const [out, setOut] = useState<string>("");
+  const [result, setResult] = useState<RunSubmitResult | null>(null); // U7: 성공 시 Runs 딥링크 배너용
+  const [err, setErr] = useState<string | null>(null);                // U7: 한국어 매핑(원시 String(e) 금지)
   const [busy, setBusy] = useState(false);
   const submit = async () => {
-    setBusy(true); setOut("");
+    setBusy(true); setOut(""); setErr(null); setResult(null);
     try {
-      const r = await apiPost("/api/runs", { runtime, mode, domain, permissionMode: perm, dryRun: dry });
+      // U7: submitRun 재사용(구조 보존 승격) — 400/409 는 runSubmitErrorText, 그 외는 readErrorText(U1 헬퍼).
+      const r = await submitRun({ runtime, mode, domain, permissionMode: perm, dryRun: dry });
+      setResult(r);
       setOut(JSON.stringify(r, null, 2));
-    } catch (e) { setOut(String(e)); }
-    finally { setBusy(false); }
+    } catch (e) {
+      if (e instanceof RunSubmitError) setErr(runSubmitErrorText(e.status, e.code, e.detail));
+      else setErr(readErrorText(e));
+    } finally { setBusy(false); }
   };
   return (
     <div className="screen">
@@ -247,6 +300,15 @@ export function Build() {
           <label className="check"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> dry-run(미리보기만)</label>
           <button disabled={busy || !domain} onClick={submit}>{busy ? "실행 중…" : dry ? "미리보기" : "실행"}</button>
         </div>
+        {/* U7: 제출 에러 한국어 인라인(A100·조용한 드롭 금지) */}
+        {err && <p className="banner err" role="alert">⚠ {err}</p>}
+        {/* U7: 실 실행 성공 → Runs 딥링크 착지 배너(F2 runsDeepLink 재사용). dry-run 은 미리보기만. */}
+        {result && result.dryRun === false && (
+          <p className="banner ok" role="status">
+            ✅ 실행을 시작했습니다 · <code className="path">{result.runId}</code>
+            {" "}<a className="link" href={runsDeepLink(result.runId)}>→ Runs에서 관찰</a>
+          </p>
+        )}
         {out && <pre className="out">{out}</pre>}
         {!dry && <p className="warn-text">⚠ 실 실행은 CLI 프로세스를 spawn합니다.</p>}
       </Card>
@@ -343,8 +405,9 @@ function AgentRunFormBody({ template }: { template: RunTemplate }) {
       });
       setResult(r);
     } catch (e) {
+      // 400/409 는 runSubmitErrorText 유지, 그 외(401 재인증·네트워크 등)는 U1 readErrorText 로 매핑(원시 String(e) 금지).
       if (e instanceof RunSubmitError) setErr(runSubmitErrorText(e.status, e.code, e.detail));
-      else setErr(String(e));
+      else setErr(readErrorText(e));
     } finally { setBusy(false); }
   };
 
@@ -854,9 +917,65 @@ export function runEventRows(e: { items: Array<{ seq: number; event: string; mes
   return e.items.slice(-30).map((x) => ({ seq: x.seq, event: x.event, message: x.message ?? "" }));
 }
 
+// ── U2 라이브 tail 훅 — running run 은 nextAfter 커서로 증분 폴링·append(중복 없음)·terminal 도달 시 중지 ──
+// 정적 run(non-live)은 최초 1회 스냅샷 유지(기존 동작). 언마운트/runId 변경 시 clearTimeout(누수 0).
+type EventItem = { seq: number; event: string; message?: string };
+type EventsResp = { items: EventItem[]; nextAfter: number; hasMore: boolean; runState: string | null; schemaVersion: string };
+type LiveEvents = { items: EventItem[]; runState: string | null; loading: boolean; err: string | null; tailing: boolean };
+
+function useLiveEvents(runId: string): LiveEvents {
+  const [items, setItems] = useState<EventItem[]>([]);
+  const [runState, setRunState] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [tailing, setTailing] = useState(false);
+  useEffect(() => {
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cursor = -1; // after exclusive: -1 → seq 0 포함
+    let nonLiveStreak = 0; // 연속 비-live(null/unknown) 응답 수 — 좀비 방지 상한(HIGH#1)
+    let drainStreak = 0;   // 연속 hasMore drain 수 — 0ms 타이트 루프 폭주 방지(HIGH#2)
+    // 폴링마다 최신 상태 반영(setItems 함수형 업데이트로 append). first=true 는 최초 로드(3-state).
+    const poll = async (first: boolean) => {
+      const path = `/api/runs/${encodeURIComponent(runId)}/events?after=${cursor}&limit=1000`;
+      try {
+        const resp = await apiGet<EventsResp>(path);
+        if (!live) return;
+        cursor = nextEventCursor(cursor, resp);
+        setItems((prev) => mergeEventItems(prev, resp.items));
+        setRunState(resp.runState);
+        setErr(null);
+        if (first) setLoading(false);
+        // HIGH#1: 중지는 명시적 terminal 에서만. null/unknown 은 계속 폴링(막 시작한 run 흡수).
+        nonLiveStreak = isLiveRunState(resp.runState) ? 0 : nonLiveStreak + 1;
+        const decision = tailDecision(resp.runState, nonLiveStreak);
+        if (decision === "stop-terminal") { setTailing(false); return; } // terminal → 폴링 중지
+        if (decision === "stop-nonlive-cap") { // 비-live 장시간 지속 → 좀비 방지 중지+안내
+          setTailing(false);
+          setErr("실행 상태를 확인할 수 없어 실시간 갱신을 중단했습니다 — 페이지를 새로고침하세요.");
+          return;
+        }
+        setTailing(true);
+        drainStreak = resp.hasMore ? drainStreak + 1 : 0; // backlog 연속 카운트(폭주 상한용)
+        timer = setTimeout(() => poll(false), nextTailDelayMs(resp.hasMore, drainStreak)); // backlog 는 (상한 내)즉시, 아니면 주기
+      } catch (e) {
+        if (!live) return;
+        if (first) { setErr(readErrorText(e)); setLoading(false); return; } // 최초 실패 → 에러 3-state
+        drainStreak = 0;
+        timer = setTimeout(() => poll(false), nextTailDelayMs(false)); // tail 중 일시 실패 → 주기 재시도(중단 안 함)
+      }
+    };
+    // runId 변경 시 상태 리셋(stale 렌더 방지)
+    setItems([]); setRunState(null); setLoading(true); setErr(null); setTailing(false);
+    poll(true);
+    return () => { live = false; if (timer) clearTimeout(timer); }; // 언마운트/재실행 시 타이머 정리(누수 0)
+  }, [runId]);
+  return { items, runState, loading, err, tailing };
+}
+
 function RunDetail({ runId }: { runId: string }) {
   const run = useApi<{ manifest: unknown; status: { state: string; exitCode: number | null; error: string | null } | null }>(`/api/runs/${encodeURIComponent(runId)}`);
-  const ev = useApi<{ items: Array<{ seq: number; event: string; message?: string }>; nextAfter: number; hasMore: boolean; runState: string | null; schemaVersion: string }>(`/api/runs/${encodeURIComponent(runId)}/events`);
+  const ev = useLiveEvents(runId); // U2: running 은 라이브 tail, 정적 run 은 1회 스냅샷
   const ag = useApi<{ agents: Array<{ name: string; state: string }> }>(`/api/runs/${encodeURIComponent(runId)}/agents`);
   const arts = useApi<{ files: string[] }>(`/api/runs/${encodeURIComponent(runId)}/artifacts`);
   const set = useApi<{ projectRoot: string }>("/api/settings");
@@ -864,6 +983,13 @@ function RunDetail({ runId }: { runId: string }) {
   const [artText, setArtText] = useState<string | null>(null);
   const [artErr, setArtErr] = useState<React.ReactNode>(null);
   const projectRoot = set.data?.projectRoot ?? "";
+  // U2: live→terminal 전환 시 status/agents/artifacts 를 1회 재조회(최종 상태 정합). 정적 run 최초 로드 시 중복 fetch 방지(prev 가 live 였을 때만).
+  const prevRunState = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevRunState.current;
+    prevRunState.current = ev.runState;
+    if (isLiveRunState(prev) && isTerminalRunState(ev.runState)) { run.reload(); ag.reload(); arts.reload(); }
+  }, [ev.runState]); // eslint-disable-line react-hooks/exhaustive-deps
   const openArt = (name: string) => {
     setArtName(name); setArtText(null); setArtErr(null);
     fetchArtifact(runId, name)
@@ -880,11 +1006,21 @@ function RunDetail({ runId }: { runId: string }) {
         <p>상태: {r.status ? <Badge kind={r.status.state === "completed" ? "ok" : r.status.state === "failed" ? "err" : "muted"}>{r.status.state}</Badge> : "무효"} {r.status?.exitCode != null && `· exit ${r.status.exitCode}`}{r.status?.error && <span className="error"> · {r.status.error}</span>}</p>
       )}</Async>
       <Async state={ag}>{(a) => a.agents.length > 0 ? <Table cols={["에이전트", "상태"]} rows={a.agents.map((x) => [x.name, x.state])} /> : <p className="muted">에이전트 상태 없음</p>}</Async>
-      <Async state={ev}>{(e) => { const rows = runEventRows(e); return (
-        <div className="events">{rows.length === 0 ? <p className="muted">이벤트 없음</p> : rows.map((x) => (
-          <div key={x.seq} className="evline"><span className="seq">#{x.seq}</span> <b>{x.event}</b> {x.message}</div>
-        ))}</div>
-      ); }}</Async>
+      {/* U2 이벤트 tail — A82/A84 3-state(로딩/에러+재시도/빈). live 이면 실시간 인디케이터. */}
+      <div className="events-panel">
+        <div className="events-head">
+          <span className="muted">이벤트</span>
+          {ev.tailing && <span className="live-tag" role="status" aria-live="polite" title="running run 을 실시간으로 tail 중입니다">🟢 실시간 (live)</span>}
+          {isTerminalRunState(ev.runState) && <span className="muted" title="종료 상태 도달 — tail 중지">■ 종료됨</span>}
+        </div>
+        {ev.loading && ev.items.length === 0 ? <p className="muted">불러오는 중…</p>
+          : ev.err ? <p className="error" role="alert">⚠ {ev.err}</p>
+          : (() => { const rows = runEventRows({ items: ev.items }); return (
+              <div className="events">{rows.length === 0 ? <p className="muted">이벤트 없음</p> : rows.map((x) => (
+                <div key={x.seq} className="evline"><span className="seq">#{x.seq}</span> <b>{x.event}</b> {x.message}</div>
+              ))}</div>
+            ); })()}
+      </div>
       {/* A83: 산출물 패널은 트리·이벤트와 독립 로딩. 한 산출물 실패(413/오류)가 다른 패널 미붕괴 */}
       <Async state={arts}>{(f) => f.files.length > 0 ? (
         <div>
@@ -1021,7 +1157,12 @@ function DocPanel({ rel, projectRoot }: { rel: string; projectRoot: string }) {
 export function Docs() {
   const tree = useApi<DocsTree>("/api/docs");
   const set = useApi<{ projectRoot: string }>("/api/settings");
-  const [sel, setSel] = useState<string | null>(null);
+  // U6: ?path= 딥링크 초기 복원(Runs ?run= 패턴 재사용) · 선택 변경 시 URL 반영(새로고침·공유 보존).
+  const [sel, setSel] = useState<string | null>(() => focusDocFromHash(location.hash));
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    history.replaceState(null, "", location.pathname + location.search + docsDeepLink(sel));
+  }, [sel]);
   return (
     <div className="screen">
       <h2>Docs</h2>
@@ -1030,12 +1171,19 @@ export function Docs() {
         <Card title="문서 트리 · docs/ (읽기전용)">
           <Async state={tree}>{(t) => t.tree.length === 0 ? (
             <div className="empty" role="status"><p className="muted">📂 docs/ 에 문서 없음</p></div>
-          ) : (
-            <>
-              {t.truncated && <p className="banner warn" role="note">✂ 트리 절단 · {t.count}개까지 표시</p>}
-              <DocTree nodes={t.tree} selected={sel} onSelect={setSel} />
-            </>
-          )}</Async>
+          ) : (() => {
+            const shown = filterDocTree(t.tree, q); // U6: 간단 트리 필터(부분일치·대소문자 무시)
+            return (
+              <>
+                {t.truncated && <p className="banner warn" role="note">✂ 트리 절단 · {t.count}개까지 표시</p>}
+                <label className="doc-filter">🔎 <input value={q} placeholder="파일 이름/경로 필터" maxLength={120}
+                  aria-label="문서 트리 필터" onChange={(e) => setQ(e.target.value)} /></label>
+                {shown.length === 0
+                  ? <p className="muted" role="status">필터에 맞는 문서 없음</p>
+                  : <DocTree nodes={shown} selected={sel} onSelect={setSel} />}
+              </>
+            );
+          })()}</Async>
         </Card>
         {sel
           ? <DocPanel key={sel} rel={sel} projectRoot={set.data?.projectRoot ?? ""} />
@@ -1590,13 +1738,37 @@ function EvalsConfigCard() {
   const st = useApi<EvalsConfigResolved>("/api/evals/config");
   return (
     <Card title="지표관리 (Part C · 설정 쓰기)">
-      <Async state={st}>{(cfg) => <EvalsConfigForm key={cfg.adoptionStage} cfg={cfg} onSaved={st.reload} />}</Async>
+      {/* 정합: adoptionStage 4 = display-only 잠금 → 폼 편집 비활성(쓰기 경로 없음·교리). 1~3 만 편집 폼. */}
+      <Async state={st}>{(cfg) => cfg.adoptionStage === 4
+        ? <LockedConfigView key="locked" cfg={cfg} />
+        : <EvalsConfigForm key={cfg.adoptionStage} cfg={cfg} onSaved={st.reload} />}</Async>
     </Card>
   );
 }
 
+// A108: 단계4 잠금 = display-only. 편집 컨트롤·저장 버튼 없음(교리). 현재값만 읽기전용 표기.
+function LockedConfigView({ cfg }: { cfg: EvalsConfigResolved }) {
+  return (
+    <div className="locked-config">
+      <p className="banner full" role="note">🔒 채택 단계 <b>4(잠금·display-only)</b> — 설정은 읽기 전용입니다. UI 에 쓰기 경로가 없습니다(교리).</p>
+      <p className="muted">현재 저장값: {adoptionStageLabel(cfg.adoptionStage)} · 제안 활성: {cfg.proposalsEnabled ? "예" : "아니오"}</p>
+      <Table cols={["지표", "활성", "가중치"]} rows={Object.entries(cfg.metrics).map(([k, m]) => [
+        k, m.enabled ? <Badge kind="ok">on</Badge> : <Badge kind="muted">off</Badge>, m.weight,
+      ])} />
+      <Table cols={["임계값", "값", "floor", "적용값(effective)"]} rows={THRESHOLD_KEYS.map((k) => [
+        THRESHOLD_LABEL[k], cfg.thresholds[k].value, cfg.thresholds[k].floor, cfg.thresholds[k].effective,
+      ])} />
+      <details className="tier-b">
+        <summary>thetaByRisk · normalization (읽기전용)</summary>
+        <pre className="out">{JSON.stringify({ thetaByRisk: cfg.thresholds.thetaByRisk, normalization: cfg.normalization }, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
 function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: () => void }) {
-  const [stage, setStage] = useState<1 | 2 | 3>(cfg.adoptionStage);
+  // 부모가 stage 4 를 LockedConfigView 로 분기 → 여기 도달값은 1~3. 방어적으로 4 는 3 으로 clamp(잠금 진입 불가).
+  const [stage, setStage] = useState<1 | 2 | 3>(() => (cfg.adoptionStage === 4 ? 3 : cfg.adoptionStage));
   const [metrics, setMetrics] = useState<Record<string, MetricSetting>>(() => ({ ...cfg.metrics }));
   const [inputs, setInputs] = useState<Record<ThresholdKey, string>>(() => ({
     minAdjudicatedClaims: String(cfg.thresholds.minAdjudicatedClaims.value),
@@ -1624,7 +1796,7 @@ function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: 
       const r = await postEvalsConfig(patch);
       setConfirmOpen(false);
       setSavedAt(new Date().toISOString());
-      setStage(r.config.adoptionStage);
+      setStage(r.config.adoptionStage === 4 ? 3 : r.config.adoptionStage); // POST 는 1~3 만 → 4 는 도달 불가(방어적 clamp)
       onSaved();
     } catch (e) {
       setConfirmOpen(false);
