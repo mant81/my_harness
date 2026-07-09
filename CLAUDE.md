@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-이 레포는 `harness` 플러그인(에이전트 팀 & 스킬 아키텍트 메타 스킬)이다. 두 개의 하네스가 구성되어 있다.
+이 레포는 `harness` 플러그인(에이전트 팀 & 스킬 아키텍트 메타 스킬)이다. 세 개의 하네스가 구성되어 있다.
 
 ## 하네스 1: my-harness (포크판 팩토리)
 
@@ -18,6 +18,16 @@
 
 **알려진 정합성 이슈:** 없음. 버전 1.3.0 정합(plugin=marketplace=badge×3=CHANGELOG), `bash skills/myharness/scripts/run-policy-audit.sh` PASS(fail 0, warn 0).
 
+## 하네스 3: harness-ui-dev (harness-ui v0.6 기획·개발)
+
+**목표:** `docs/harness-ui/v0.6/design/design-v0.6.md` 설계서를 마일스톤(M7~M13·F2~F8) 단위로 한 번에 하나씩 기획→구현→검증→게이트→커밋.
+
+**트리거:** harness-ui v0.6 기능 구현·마일스톤 착수·후속 작업 요청 시 `harness-ui-dev` 스킬을 사용하라. 단순 1파일 질문은 직접 응답.
+
+**구성:** 에이전트 5(`spec-planner`, `server-builder`, `web-builder`, `qa-verifier`, `security-auditor`) + 스킬 5(`harness-ui-dev` 오케스트레이터·`milestone-spec`·`harness-ui-impl`·`security-review`·`external-review-loop`). 모드: 에이전트 팀(생성-검증 + 마일스톤 파이프라인 하이브리드), 전원 `model: opus`. 게이트: 리스크 등급별(M7/M9/M10=표준·외부리뷰 1회 / M8/M11/M12/M13=중대·단계마다+승인 사다리), 외부 리뷰어 codex+agy(러너 claude 제외). 교리 주입 = `dev-rules`·`tdd-doctrine`(코드 에이전트 실경로). 상세는 각 `.claude/agents/*`, `.claude/skills/*` 단일 출처.
+
+**알려진 정합성 이슈:** 설계서 정합성 리뷰에서 발견 — 설계서 제목/도입부 F7·F8 누락, 내부 "A81-A99" ↔ 정본 "A81~A101", PRD/page-requirements 헤더 "A47-A71" stale(정본 A47~A112). 착수 마일스톤에 걸린 것만 정정(spec-planner 정합성 점검). F8 암호 스택·owner/mode 검증은 코드 미실재(신규 구축·"재사용" 표기 주의).
+
 ## 변경 이력
 | 날짜 | 변경 내용 | 대상 | 사유 |
 |------|----------|------|------|
@@ -26,4 +36,5 @@
 | 2026-06-10 | 코드레벨 리뷰 반영 P1+P2: F1 죽은 포인터→실경로, F2 커밋순서·자율노브(`_workspace/.autonomous`), F3 리스크 등급(경량/표준/중대), F5 결과서-RAG 연속성 | skills/my-harness(+references), skills/external-review-loop | 무차별 게이트 과의식 제거 + 주입 기능 무효 버그 수정 + R2-D2 신규 가치(결과서 RAG) 추출 |
 | 2026-06-15 | 외부 리뷰 성능 리뷰어 `gemini`(deprecated) → `agy`(antigravity CLI, Gemini 모델) 이관. check-review-tools.sh agy 감지·우선, external-review-loop Step1/2 `agy -p --model "Gemini 3.1 Pro (High)" --sandbox --print-timeout` 실행으로 교체, 산문·scorecard source 화이트리스트 sweep. gemini는 legacy 폴백 유지 | skills/myharness(+scripts/check-review-tools.sh, build-scorecard.sh, references/external-review-loop.md 외), README 3종, plugin/marketplace, docs/self-evaluation-system.md | gemini CLI 단종 → agy로 Gemini 연동 지속(스모크 테스트 통과). 정책 감사 PASS |
 | 2026-06-21 | `TeamCreate`/`TeamDelete` 제거 대응(Claude Code v2.1.178). 팀 setup/teardown 단계 폐지 → 팀원은 `Agent` 도구로 직접 spawn, 세션 종료 시 자동 정리. 죽은 도구 가리키던 본문·references·문서 3개국어 갱신(`SendMessage`·`TaskCreate`는 유효 유지) | skills/myharness/SKILL.md(+references/{orchestrator-template,team-examples,runtime-adapters,agent-design-patterns}), README 3종, AGENTS.md, docs/experimental-dependency.md, CHANGELOG | 외부 댓글 제보 → 공식 changelog/agent-teams docs로 검증(Scenario A/C 실현). 정책 감사 PASS |
+| 2026-07-09 | 하네스 3 `harness-ui-dev` 신규 구성 — harness-ui v0.6 기획·개발용. 에이전트 5·스킬 5(오케스트레이터+milestone-spec+harness-ui-impl+security-review+external-review-loop) 생성, 교리(dev-rules·tdd-doctrine) 오케스트레이터 references/로 복사·코드 에이전트 실경로 주입, 리스크 등급별 게이트(중대 M8/M11/M12/M13·표준 M7/M9/M10), 외부 리뷰어 codex+agy 점검(러너 claude 제외·풀 가용). 설계서 코드근거 12/13 정합 검증·재사용 오표기(F8 crypto·owner/mode 미실재) 규약에 명시 | `.claude/agents/{spec-planner,server-builder,web-builder,qa-verifier,security-auditor}.md`, `.claude/skills/{harness-ui-dev,milestone-spec,harness-ui-impl,security-review,external-review-loop}/` | 설계서 v0.6 추가구현 착수를 위한 기획+개발 하네스 요청(Claude 전용·5명 분리·리스크 등급별 게이트) |
 | 2026-07-05 | D4 산출물 방치 버그 강제장치 풀 배선. `check-artifacts.sh`(결과서 docs/ 기록+`## 다음 단계 참조` grep 검증) + 생성 하네스 `pre-commit` hook(런타임 물리 차단, 프롬프트 아님). SKILL 커밋순서·체크리스트에 배선(500줄 캡 유지), orchestrator-template hook 설치 절차, harness-update 번들 화이트리스트, factory-map ✅ active(T2-lite 구조는 외부감사 기각), skeleton 교훈→개선 섹션. grep latent 버그(번호 접두 heading false-fail) 수정. L2 mock A/B 6/6 PASS | skills/myharness/SKILL.md·scripts/{check-artifacts,harness-update}.sh·references/{orchestrator-template,factory-map,templates/working-history-skeleton}, docs/myharness/d4-t2lite-forcing-design.md | 실사용 산출물 `_workspace` 방치·소멸 → 강제장치 부재가 근본원인(외부감사 수렴). 정책 감사 PASS |
