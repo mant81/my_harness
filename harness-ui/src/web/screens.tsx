@@ -11,10 +11,21 @@ import {
   encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
   postProjectRoot, ProjectRootError, cancelActiveRuns,
   getDefinition, putDefinition, rollbackDefinition, setDefinitionEdit, DefEditError,
+  postEvalsConfig, EvalsConfigError,
   type DocsNode, type DocsTree, type DocPreview,
   type SettingsInfo, type ProjectRootPreview,
   type DefKind, type DefinitionDoc, type PutDefResult,
+  type EvalsIndex, type LoopIndexEntry, type LoopTrend, type TrendPoint,
+  type ScorecardDetail, type EvalProposal, type EvalsConfigResolved,
+  type MetricSetting,
 } from "./api.js";
+import {
+  type ThresholdKey, FLOORS, THRESHOLD_KEYS, THRESHOLD_LABEL,
+  alignmentText, gtMetricText, numOrDash, verdictCountsText, terminationExcerpt,
+  evalsEmptyState, proposalDisabledText, gateShortfalls,
+  parseIntInput, thresholdError, thresholdDiff, thresholdsValid,
+  stageNeedsHighRiskConfirm, adoptionStageLabel, buildConfigPatch, evalsConfigErrorText,
+} from "./evals.js";
 import {
   defEditErrorText, diffLines, diffStats, hasChanges, isDiffCoarse, sideRows,
   skillNeedsName, skillHasClaudePath, isDirty, rollbackBodyFromSave,
@@ -1310,5 +1321,417 @@ function DefinitionEditToggle({ enabled, onSaved }: { enabled: boolean; onSaved:
         </ConfirmDialog>
       )}
     </Card>
+  );
+}
+
+// ── 9. Eval (F8 M13 · 축소안 — Part A 읽기 · Part B 제안(자동금지) · Part C config) ──
+// 교리: alignment≠품질 · 자동 적용 절대 없음(제안+사람 승인만) · floor 미만 저장 불가 · 단계4 잠금.
+// XSS: scorecard 자유 텍스트(warnings·termination_reason 등)는 데이터(지시 흡수 금지). 렌더 정책 2분기:
+//   - 표(loop index·trend)의 terminationReason: terminationExcerpt(evals.ts)로 제어문자 제거·개행 단일화·N자 절단
+//     → React text 노드 escape(실행 불가·표 레이아웃 방어). 긴 마크다운은 표에 부적합.
+//   - 상세(ScorecardDetailCard)의 termination_reason/warnings 전문: SafeMd(render.ts DV8 sanitizer) 통과.
+
+const fmtMs = (ms: number): string => {
+  if (!Number.isFinite(ms)) return "—";
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 19).replace("T", " ");
+};
+
+// A90/A103 정합도 배지 — "정합도(품질 아님)" + 산정식 툴팁(색 비의존·텍스트 병기).
+function AlignmentBadgeLegend({ formula }: { formula: string }) {
+  return (
+    <span className="align-legend" role="note" tabIndex={0} title={formula}
+      aria-label={`정합도(품질 아님) · 산정식 ${formula}`}>
+      📐 정합도(품질 아님) <span className="muted">— {formula}</span>
+    </span>
+  );
+}
+
+// verified:false → "미검증" 배지(사유 툴팁). true → "검증됨"(재도출 일치).
+function VerifiedBadge({ verified, reason }: { verified: boolean; reason?: string | null }) {
+  return verified
+    ? <Badge kind="ok">✓ 검증됨</Badge>
+    : <span title={reason ?? "재도출 불일치/불가"}><Badge kind="warn">⚠ 미검증</Badge></span>;
+}
+
+// scorecard 자유 텍스트 = 데이터(지시 흡수 금지). DV8 파이프라인(markdown-it html:false + DOMPurify)만 통과분 주입.
+function SafeMd({ text }: { text: string }) {
+  return <div className="md-body scorecard-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
+}
+
+export function Eval() {
+  const idx = useApi<EvalsIndex>("/api/evals");
+  const [loop, setLoop] = useState<string | null>(null);
+  return (
+    <div className="screen">
+      <h2>Eval <span className="ver">F8 · 자기평가</span></h2>
+      <p className="muted">
+        self-eval scorecard 관측·자기개선 제안(사람 승인만)·지표관리. <b>alignment_score 는 정합도이지 품질이 아닙니다</b> ·
+        제안은 <b>자동 적용되지 않습니다</b>(F7 편집기에서 수동 검토·저장).
+      </p>
+      <Async state={idx}>{(d) => <EvalIndexBody idx={d} loop={loop} onLoop={setLoop} />}</Async>
+    </div>
+  );
+}
+
+function EvalIndexBody({ idx, loop, onLoop }: { idx: EvalsIndex; loop: string | null; onLoop: (l: string | null) => void }) {
+  const empty = evalsEmptyState(idx);
+  return (
+    <>
+      {/* A104: 빈/미실행 = 고장 아님 + 실행 위치/방법 CTA(데드엔드 금지) */}
+      {empty && (
+        <Card title={empty.title}>
+          <div className="empty" role="status">
+            <p>{empty.kind === "unavailable" ? "⛔" : "🧪"} {empty.body}</p>
+            <p className="muted">{empty.cta}</p>
+          </div>
+        </Card>
+      )}
+      {!empty && (
+        <Card title="평가 루프 (Part A · 읽기전용)">
+          {idx.truncated && <p className="banner warn" role="note">✂ 루프 스캔 절단(상한 도달) · 일부만 표시</p>}
+          <Table cols={["루프", "run 수(열거)", "최근 정합도", "최근 종료사유"]} rows={idx.loops.map((l) => [
+            <button className="link" onClick={() => onLoop(l.loop)}>{l.loop}</button>,
+            l.runCount,
+            l.latest ? <span title={idx.labels.alignmentFormula}>{alignmentText(l.latest.alignmentScore)}{!l.latest.verified && " ⚠"}</span> : <span className="muted">—</span>,
+            l.latest?.terminationReason
+              ? <span title={l.latest.terminationReason}>{terminationExcerpt(l.latest.terminationReason) || "—"}</span>
+              : <span className="muted">—</span>,
+          ])} />
+          <p className="muted">🕳 미측정(unavailable)·격리(corrupt) 세부는 루프를 열어 추세의 <b>유효/미측정/격리</b> 카운트에서 확인하세요(인덱스는 최신 1건만 읽어 OOM 방어).</p>
+          <p className="muted">{idx.note}</p>
+        </Card>
+      )}
+      {loop && <LoopTrendCard key={loop} loop={loop} onClose={() => onLoop(null)} />}
+      {loop && <ProposalCard key={"prop:" + loop} loop={loop} />}
+      {/* Part C 지표관리 — 항상 표시(읽기/쓰기 경계 명확·독립 로딩) */}
+      <EvalsConfigCard />
+    </>
+  );
+}
+
+// Part A 추세 — GET /api/evals/:loop. series(asc) 테이블 + run 선택 → scorecard 상세.
+function LoopTrendCard({ loop, onClose }: { loop: string; onClose: () => void }) {
+  const st = useApi<LoopTrend>(`/api/evals/${encodeURIComponent(loop)}`);
+  const [sel, setSel] = useState<{ stage: string; run: string } | null>(null);
+  return (
+    <Card title={`추세 · ${loop} (Part A)`}>
+      <button className="link" onClick={onClose}>✕ 닫기</button>
+      <Async state={st}>{(d) => !d.found || d.series.length === 0 ? (
+        <div className="empty" role="status">
+          <p className="muted">🧪 이 루프의 유효 scorecard 가 없습니다(격리 {d.counts.corrupt} · 미측정 {d.counts.unavailable}).</p>
+          <p className="muted">평가 루프를 실행하면 추세가 표시됩니다.</p>
+        </div>
+      ) : (
+        <>
+          <AlignmentBadgeLegend formula={d.labels.alignmentFormula} />
+          <p className="muted">
+            추세 소스: {d.trendSource}(in-process 재계산 · 암호 rollup 아님 → <b>미검증 표시</b>) ·
+            유효 {d.counts.valid} / 미측정 {d.counts.unavailable} / 격리 {d.counts.corrupt}
+            {d.truncated && " · ✂ 절단(일부만)"}
+          </p>
+          <Table cols={["기록 시각", "stage/run", "정합도", "rounds_norm", "overturned(GT)", "verdicts", "종료사유", "품질(LLM 해석)", "검증"]}
+            rows={d.series.map((p) => [
+              fmtMs(p.recordedAtMs),
+              <button className="link" onClick={() => setSel({ stage: p.stageId, run: p.runId })}>{p.stageId}/{p.runId.slice(0, 16)}</button>,
+              <span title={d.labels.alignmentFormula}>{alignmentText(p.alignmentScore)}</span>,
+              numOrDash(p.roundsNormalized),
+              <span title={d.labels.overturnedRejectionRate} className={p.overturnedRejectionRate === null ? "muted" : ""}>{gtMetricText(p.overturnedRejectionRate)}</span>,
+              verdictCountsText(p.verdictCounts),
+              p.terminationReason
+                ? <span title={p.terminationReason}>{terminationExcerpt(p.terminationReason) || "—"}</span>
+                : <span className="muted">—</span>,
+              p.qualityLabel ? <span title={d.labels.qualityLabel}>{p.qualityLabel} <Badge kind="muted">LLM 해석</Badge></span> : <span className="muted">—</span>,
+              <VerifiedBadge verified={p.verified} reason={p.unverifiedReason} />,
+            ])} />
+          <p className="muted">📐 정합도 산정식: {d.labels.alignmentFormula} · <b>{d.labels.alignmentScore}</b></p>
+          <p className="muted">🌐 {d.labels.missedDefectRate}</p>
+          {sel && <ScorecardDetailCard key={sel.stage + "/" + sel.run} loop={loop} stage={sel.stage} run={sel.run} onClose={() => setSel(null)} />}
+        </>
+      )}</Async>
+    </Card>
+  );
+}
+
+// Part A scorecard 상세 — GET /api/evals/:loop/:stage/:run. 자유 텍스트는 DV8/React escape.
+function ScorecardDetailCard({ loop, stage, run, onClose }: { loop: string; stage: string; run: string; onClose: () => void }) {
+  const st = useApi<ScorecardDetail>(`/api/evals/${encodeURIComponent(loop)}/${encodeURIComponent(stage)}/${encodeURIComponent(run)}`);
+  return (
+    <Card title={`scorecard · ${stage}/${run.slice(0, 24)}`}>
+      <button className="link" onClick={onClose}>✕ 닫기</button>
+      <Async state={st}>{(d) => {
+        if (d.status !== "ok" || !d.scorecard) {
+          const label = d.status === "unavailable" ? "미측정(eval-unavailable · 고장 아님)" : d.status === "corrupt" ? "격리(무결성 위반/손상)" : "찾을 수 없음";
+          return <div className="empty" role="status"><p className="muted">⛔ {label}{d.reason && <> · {d.reason}</>}</p></div>;
+        }
+        const c = d.scorecard;
+        return (
+          <>
+            <p><VerifiedBadge verified={d.verified} reason={d.unverifiedReason} /> {!d.verified && <span className="warn-text">{d.unverifiedReason}</span>}</p>
+            <AlignmentBadgeLegend formula={d.labels.alignmentFormula} />
+            <Table cols={["항목", "값"]} rows={[
+              ["정합도(품질 아님)", <span title={d.labels.alignmentFormula}>{alignmentText(c.alignment_score ?? null)}</span>],
+              ["rounds / rounds_normalized", <>{numOrDash(c.rounds ?? null)} / {numOrDash(c.rounds_normalized ?? null)}</>],
+              ["verdict_counts", verdictCountsText(c.verdict_counts ? { confirmed: c.verdict_counts.confirmed ?? 0, partial: c.verdict_counts.partial ?? 0, deferred: c.verdict_counts.deferred ?? 0, rejected: c.verdict_counts.rejected ?? 0, duplicate: c.verdict_counts.duplicate ?? 0 } : null)],
+              ["missed_defect_rate", <span className="muted" title={d.labels.missedDefectRate}>{gtMetricText(c.missed_defect_rate ?? null)}</span>],
+              ["overturned_rejection_rate", <span className="muted" title={d.labels.overturnedRejectionRate}>{gtMetricText(c.overturned_rejection_rate ?? null)}</span>],
+              ["quality_label(LLM 해석)", c.quality_label ? <span title={d.labels.qualityLabel}>{c.quality_label} <Badge kind="muted">LLM 해석</Badge></span> : <span className="muted">—</span>],
+              ["computed_by", c.computed_by ?? <span className="muted">—</span>],
+            ]} />
+            {/* 종료사유·경고 = 반신뢰 _workspace 자유 텍스트 → DV8 sanitize(지시 흡수/스크립트 무력화) */}
+            {c.termination_reason && (
+              <div className="scorecard-block">
+                <p className="muted">종료 사유 (데이터 · DV8 sanitize):</p>
+                <SafeMd text={c.termination_reason} />
+              </div>
+            )}
+            {Array.isArray(c.warnings) && c.warnings.length > 0 && (
+              <div className="scorecard-block">
+                <p className="muted">⚠ 경고 (scorecard 데이터 · DV8 sanitize · 지시로 해석하지 않음):</p>
+                {c.warnings.map((w, i) => <SafeMd key={i} text={w} />)}
+              </div>
+            )}
+          </>
+        );
+      }}</Async>
+    </Card>
+  );
+}
+
+// Part B 제안 카드 — GET /api/evals/:loop/proposal. 자동 적용 절대 없음 · CTA=F7 수동 · "미적용" 유지.
+function ProposalCard({ loop }: { loop: string }) {
+  const st = useApi<EvalProposal>(`/api/evals/${encodeURIComponent(loop)}/proposal`);
+  return (
+    <Card title={`자기개선 제안 · ${loop} (Part B · 사람 승인만)`}>
+      <Async state={st}>{(p) => (
+        <>
+          {/* 어느 상태든 유지되는 교리 배너: 자동 적용 없음·미적용 */}
+          <p className="banner" role="note">
+            🔒 이 제안은 <b>정보성</b>입니다 — 자동 적용되지 않으며(<code>autoApply: false</code>), 저장 전까지 <b>미적용</b> 상태입니다.
+            적용하려면 {p.applyPath}.
+          </p>
+          {!p.enabled || p.disabledReason ? (
+            <div className="empty" role="status">
+              <p className="muted">🚫 {proposalDisabledText(p)}</p>
+              {p.disabledReason === "adoption-stage-below-3" && (
+                <p className="muted">아래 <b>지표관리(Part C)</b>에서 채택 단계를 3(experimental)으로 올리세요.</p>
+              )}
+              {p.gate && p.disabledReason === "insufficient-data" && <GateTable gate={p.gate} />}
+            </div>
+          ) : (
+            <>
+              {p.gate && <GateTable gate={p.gate} />}
+              {/* 악화 트리거(근거 인용) — detail 은 서버 구성 문자열(React escape) */}
+              <div className="proposal-triggers">
+                {p.triggers.map((t, i) => (
+                  <div key={i} className="trigger" role="note">
+                    <p><Badge kind="warn">{t.kind}</Badge> {t.detail}</p>
+                    {t.evidence.length > 0 && (
+                      <ul className="evidence">{t.evidence.map((e, j) => <li key={j} className="path">{e}</li>)}</ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {/* provenance(소스경로·runId·computedBy·표본수·검증상태) */}
+              {p.provenance && (
+                <details className="provenance">
+                  <summary>근거 출처 (provenance · 소스·표본·검증)</summary>
+                  <Table cols={["항목", "값"]} rows={[
+                    ["computedBy", p.provenance.computedBy],
+                    ["표본 수", p.provenance.sampleSize],
+                    ["검증 상태", p.provenance.verificationStatus],
+                    ["runIds", p.provenance.runIds.join(", ") || "—"],
+                  ]} />
+                  <p className="muted">소스 scorecard:</p>
+                  <ul className="src-paths">{p.provenance.sourcePaths.map((s, i) => <li key={i} className="path">{s}</li>)}</ul>
+                </details>
+              )}
+              {/* 인용 scorecard */}
+              {p.citedScorecards.length > 0 && (
+                <Table cols={["stage/run", "정합도", "검증"]} rows={p.citedScorecards.map((c) => [
+                  `${c.stageId}/${c.runId.slice(0, 16)}`,
+                  <span title={p.labels.alignmentFormula}>{alignmentText(c.alignmentScore)}</span>,
+                  <VerifiedBadge verified={c.verified} />,
+                ])} />
+              )}
+              {/* A112/A105 CTA — "승인"이 아니라 "편집기에서 검토·저장"(수동·F7) */}
+              <div className="detail-actions">
+                <a className="primary link" href="#/agents">✎ 편집기에서 검토·저장 (F7 · 수동)</a>
+              </div>
+              <p className="muted">※ 평가기준·에이전트 tools/skills·역할·게이트 변경은 <b>항상 사람 승인</b>입니다. 여기서 자동 반영되는 것은 없습니다.</p>
+            </>
+          )}
+          <p className="muted">{p.note}</p>
+        </>
+      )}</Async>
+    </Card>
+  );
+}
+
+// A106 게이트 표 — 실데이터 기준(config 값 아님). 미충족 항목 "N회 더 필요" 정직 표기.
+function GateTable({ gate }: { gate: EvalProposal["gate"] }) {
+  if (!gate) return null;
+  const short = gateShortfalls(gate);
+  return (
+    <div className="gate-block" role="note">
+      <Table cols={["게이트 조건", "현재", "요구", "충족"]} rows={[
+        ["판정 주장(adjudicated)", gate.adjudicated, gate.minAdjudicated, gate.adjudicatedMet ? <Badge kind="ok">✓</Badge> : <Badge kind="warn">미달</Badge>],
+        ["유효 관측(rolling)", gate.observations, gate.rollingN, gate.observationsMet ? <Badge kind="ok">✓</Badge> : <Badge kind="warn">미달</Badge>],
+        ["연속 하락(streak)", gate.declineStreak, gate.requiredStreak, gate.streakMet ? <Badge kind="ok">✓</Badge> : <Badge kind="warn">미달</Badge>],
+        ["발화(fires)", gate.fires ? <Badge kind="warn">발화</Badge> : <Badge kind="ok">비발화</Badge>, "", ""],
+      ]} />
+      {short.length > 0 && <p className="muted">🕳 미충족: {short.join(" · ")}</p>}
+    </div>
+  );
+}
+
+// Part C 지표관리 — GET config → 폼 → POST(mutating). floor 상시 표시·미만 인라인 거부·단계3 고위험 확인.
+function EvalsConfigCard() {
+  const st = useApi<EvalsConfigResolved>("/api/evals/config");
+  return (
+    <Card title="지표관리 (Part C · 설정 쓰기)">
+      <Async state={st}>{(cfg) => <EvalsConfigForm key={cfg.adoptionStage} cfg={cfg} onSaved={st.reload} />}</Async>
+    </Card>
+  );
+}
+
+function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: () => void }) {
+  const [stage, setStage] = useState<1 | 2 | 3>(cfg.adoptionStage);
+  const [metrics, setMetrics] = useState<Record<string, MetricSetting>>(() => ({ ...cfg.metrics }));
+  const [inputs, setInputs] = useState<Record<ThresholdKey, string>>(() => ({
+    minAdjudicatedClaims: String(cfg.thresholds.minAdjudicatedClaims.value),
+    rollingN: String(cfg.thresholds.rollingN.value),
+    declineStreak: String(cfg.thresholds.declineStreak.value),
+  }));
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  const metricKeys = Object.keys(metrics);
+  const thresholdsOk = thresholdsValid(inputs);
+  const canSubmit = thresholdsOk && !busy;
+
+  const setInput = (k: ThresholdKey, v: string) => { setInputs((p) => ({ ...p, [k]: v })); setErr(null); setSavedAt(null); };
+  const setMetric = (k: string, patch: Partial<MetricSetting>) => {
+    setMetrics((p) => ({ ...p, [k]: { ...p[k]!, ...patch } })); setSavedAt(null);
+  };
+
+  const doSave = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const patch = buildConfigPatch(cfg, { adoptionStage: stage, metrics, thresholds: inputs });
+      const r = await postEvalsConfig(patch);
+      setConfirmOpen(false);
+      setSavedAt(new Date().toISOString());
+      setStage(r.config.adoptionStage);
+      onSaved();
+    } catch (e) {
+      setConfirmOpen(false);
+      if (e instanceof EvalsConfigError) setErr(evalsConfigErrorText(e.code, e.status));
+      else setErr(String(e));
+    } finally { setBusy(false); }
+  };
+
+  // 저장 클릭 → floor 검증(버튼 disabled 로 1차)·단계3 전환은 고위험 확인 다이얼로그(A111/A85).
+  const onSaveClick = () => {
+    if (!thresholdsOk) return;
+    setErr(null);
+    if (stageNeedsHighRiskConfirm(cfg.adoptionStage, stage)) setConfirmOpen(true);
+    else doSave();
+  };
+
+  return (
+    <>
+      {/* 채택 단계 — 1~3 편집 · 4 는 잠금(display-only) */}
+      <div className="form">
+        <label>채택 단계 (adoptionStage)
+          <select value={stage} onChange={(e) => { setStage(Number(e.target.value) as 1 | 2 | 3); setSavedAt(null); }}>
+            <option value={1}>{adoptionStageLabel(1)}</option>
+            <option value={2}>{adoptionStageLabel(2)}</option>
+            <option value={3}>{adoptionStageLabel(3)}</option>
+          </select>
+        </label>
+        <p className="muted full">현재 저장값: {adoptionStageLabel(cfg.adoptionStage)} · 제안 활성: {cfg.proposalsEnabled ? "예(단계≥3)" : "아니오"}</p>
+        {stage === 3 && cfg.adoptionStage < 3 && (
+          <p className="banner warn full" role="note">🧪 단계 3 은 <b>experimental</b>(제안 생성 활성) — 저장 시 고위험 확인이 필요합니다.</p>
+        )}
+        {/* A108: 단계4 = display-only 잠금(쓰기 경로 없음) */}
+        <p className="banner full" role="note">🔒 단계 4(잠금·display-only)는 UI 에서 설정할 수 없습니다 — 쓰기 경로가 없습니다(교리).</p>
+      </div>
+
+      {/* per-metric enable/weight */}
+      <fieldset className="form full">
+        <legend>지표 (per-metric enable / weight 0~1)</legend>
+        {metricKeys.length === 0
+          ? <p className="muted">등록된 지표가 없습니다(기본값).</p>
+          : metricKeys.map((k) => (
+              <div key={k} className="metric-row">
+                <label className="check">
+                  <input type="checkbox" checked={metrics[k]!.enabled} onChange={(e) => setMetric(k, { enabled: e.target.checked })} />
+                  {k}
+                </label>
+                <label>가중치
+                  <input type="number" min={0} max={1} step={0.05} value={metrics[k]!.weight}
+                    onChange={(e) => setMetric(k, { weight: Math.max(0, Math.min(1, Number(e.target.value) || 0)) })} />
+                </label>
+              </div>
+            ))}
+      </fieldset>
+
+      {/* 임계값 — floor 상시 표시 · 미만 인라인 거부(silent clamp 금지) · old→effective diff */}
+      <fieldset className="form full">
+        <legend>임계값 (floor 미만 저장 불가 · 자동 보정 없음)</legend>
+        {THRESHOLD_KEYS.map((k) => {
+          const leaf = cfg.thresholds[k];
+          const diff = thresholdDiff(k, leaf, inputs[k]);
+          const errText = thresholdError(k, parseIntInput(inputs[k]));
+          return (
+            <div key={k} className="threshold-row">
+              <label>{THRESHOLD_LABEL[k]}
+                <input type="number" inputMode="numeric" value={inputs[k]} min={FLOORS[k]}
+                  aria-invalid={errText ? "true" : undefined} onChange={(e) => setInput(k, e.target.value)} />
+                <span className="floor-hint muted"> · 최소(floor) {FLOORS[k]} 상시</span>
+              </label>
+              {errText
+                ? <p className="banner err" role="alert">⚠ {errText}</p>
+                : diff.changed && <p className="muted diff-hint">변경: {diff.oldValue} → {diff.newValue} (적용값 effective = {diff.newEffective}; effective = max(값, floor))</p>}
+              {!diff.changed && !errText && <p className="muted diff-hint">현재 {leaf.value} · 적용값(effective) {leaf.effective}</p>}
+            </div>
+          );
+        })}
+      </fieldset>
+
+      {/* thetaByRisk·normalization = 이번 UI 범위 밖(보존·clobber 금지) */}
+      <details className="tier-b">
+        <summary>thetaByRisk · normalization (보존 · 이 폼에서 미편집)</summary>
+        <pre className="out">{JSON.stringify({ thetaByRisk: cfg.thresholds.thetaByRisk, normalization: cfg.normalization }, null, 2)}</pre>
+        <p className="muted">이 값들은 저장 시 현재값 그대로 보존됩니다(형제 필드 clobber 금지).</p>
+      </details>
+
+      {err && <p className="banner err" role="alert">⚠ {err}</p>}
+      {savedAt && <p className="banner ok" role="status">✓ 저장됨 ({savedAt.slice(0, 19)}) · 적용값(effective)은 floor 미만으로 내려가지 않습니다.</p>}
+
+      <div className="detail-actions">
+        <button className="primary" disabled={!canSubmit} onClick={onSaveClick}>{busy ? "저장 중…" : "설정 저장"}</button>
+        {!thresholdsOk && <span className="muted"> · 임계값이 floor 미만이거나 무효입니다(저장 불가).</span>}
+      </div>
+
+      {/* A111/A85: 단계3 전환 고위험 확인 다이얼로그 */}
+      {confirmOpen && (
+        <ConfirmDialog title="채택 단계 3 전환 확인 (고위험 · experimental)" onCancel={() => setConfirmOpen(false)}>
+          <p className="muted">
+            채택 단계 <b>3(experimental)</b>으로 올리면 자기개선 <b>제안 생성이 활성화</b>됩니다.
+            제안은 <b>정보성</b>이며 <b>자동 적용되지 않습니다</b>(F7 편집기 수동 검토·저장·사람 승인 backstop).
+          </p>
+          <p className="warn-text">⚠ alignment_score 는 정합도이지 품질 보증이 아닙니다. 제안은 추세 기반 후보이지 확정이 아닙니다.</p>
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+          <div className="modal-actions">
+            <button onClick={() => setConfirmOpen(false)} disabled={busy}>취소 (변경 없음)</button>
+            <button className="primary" disabled={busy} onClick={doSave}>{busy ? "저장 중…" : "단계 3 으로 저장"}</button>
+          </div>
+        </ConfirmDialog>
+      )}
+    </>
   );
 }

@@ -183,3 +183,19 @@ details.tier-b[open] > summary { margin-bottom:8px; }
 .def-saved { margin-top:12px; display:flex; flex-direction:column; gap:6px; }
 .def-saved p { margin:0; }
 .def-saved button { align-self:flex-start; background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 12px; font:inherit; cursor:pointer; }
+
+/* ── F8 Eval 대시보드(M13) ── */
+.align-legend { display:inline-block; margin:6px 0; padding:4px 8px; border:1px solid var(--line); border-radius:6px; font-size:12px; cursor:help; }
+.align-legend:focus { outline:2px solid var(--accent,#58a6ff); }
+.scorecard-block { margin-top:12px; }
+.scorecard-text.md-body { border:1px solid var(--line); border-radius:6px; padding:8px; background:var(--bg); font-size:13px; }
+.gate-block { margin:10px 0; }
+.proposal-triggers { margin:10px 0; display:flex; flex-direction:column; gap:8px; }
+.trigger { border-left:3px solid var(--warn,#d29922); padding:4px 10px; }
+.evidence, .src-paths { margin:4px 0 0; padding-left:18px; font-size:12px; }
+.evidence li, .src-paths li { word-break:break-all; }
+.provenance { margin:10px 0; }
+.metric-row, .threshold-row { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+.threshold-row { flex-direction:column; align-items:flex-start; }
+.floor-hint { font-size:12px; }
+.diff-hint { margin:2px 0 0; font-size:12px; }

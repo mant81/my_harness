@@ -278,6 +278,45 @@ export async function setDefinitionEdit(enabled: boolean): Promise<{ ok: true; d
   return r.json() as Promise<{ ok: true; definitionEditEnabled: boolean }>;
 }
 
+// ── F8 Eval 대시보드(M13·축소안) ──
+// 서버 확정 계약(server-builder 완료·이대로 소비):
+//   GET  /api/evals                       → EvalsIndex(loop 목록·최근 요약·labels·evalsAvailable)
+//   GET  /api/evals/:loop                 → LoopTrend(series asc·counts·trendSource:"scorecards-inprocess")
+//   GET  /api/evals/:loop/:stage/:run     → ScorecardDetail(status·scorecard|null·verified)
+//   GET  /api/evals/:loop/proposal        → EvalProposal(enabled·disabledReason·gate·triggers·provenance·autoApply:false)
+//   GET  /api/evals/config                → EvalsConfigResolved(adoptionStage·thresholds{value,floor,effective}·metrics)
+//   POST /api/evals/config (mutating·Host/Origin/token) body EvalsConfigPatch → { ok:true, config }
+//     · 400 { error:"bad-input", detail } — adoptionStage:4·floor 미만·미지 필드(strict) → 거부(silent clamp 없음)
+// GET 은 useApi(path) 로 소비(순수 조회). config 쓰기만 아래 전용 함수(구조 보존 승격·조용한 드롭 금지).
+import type { EvalsConfigResolved, EvalsConfigPatch } from "./evals.js";
+export type {
+  EvalLabels, EvalsIndex, LoopIndexEntry, LoopLatest, LoopTrend, TrendPoint, VerdictCounts,
+  ScorecardDetail, Scorecard, EvalProposal, ProposalGate, ProposalTrigger, ProposalProvenance,
+  EvalsConfigResolved, EvalsConfigPatch, MetricSetting, ThresholdLeaf,
+} from "./evals.js";
+
+export class EvalsConfigError extends Error {
+  constructor(public readonly status: number, public readonly code: string, public readonly detail?: unknown) {
+    super(code);
+    this.name = "EvalsConfigError";
+  }
+}
+
+// Part C 저장(mutating·config RMW·타 필드 보존은 서버 권위). 400 bad-input → 구조 보존 승격.
+export async function postEvalsConfig(body: EvalsConfigPatch): Promise<{ ok: true; config: EvalsConfigResolved }> {
+  const r = await fetch("/api/evals/config", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
+    throw new EvalsConfigError(r.status, String(d.error ?? r.status), d.detail);
+  }
+  return r.json() as Promise<{ ok: true; config: EvalsConfigResolved }>;
+}
+
 // ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
 // healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
 // 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).

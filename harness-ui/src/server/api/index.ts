@@ -24,6 +24,8 @@ import { cancelRun } from "../supervisor/reconcile.js";
 import { join as pjoin } from "node:path";
 import { projectsHomeFromEnv, updateConfig, loadConfigFromDisk } from "../lib/config.js";
 import { validateProjectRoot, revalidateForPersist } from "../lib/projectroot.js";
+import { listEvalLoops, loopTrend, scorecardDetail, loopProposal } from "../adapters/evals.js";
+import { loadEvalsConfig, updateEvalsConfig, EvalsConfigBody } from "../lib/evalsconfig.js";
 
 // PV3: activeRunsWarning 산출. listRuns 재사용(신규 스캐너 금지) → status.json running 카운트.
 //   재시작 시 고아될 라이브 supervised run 판정(owner 레지스트리 cross-restart 는 미사용 — 열린질문 4).
@@ -383,6 +385,35 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
     const runDir = pjoin(projectRoot, "_workspace", "runs", req.params.runId);
     return cancelRun(runDir, req.params.runId);
   });
+
+  // ── F8(M13) Eval 대시보드 — 축소안(Part A 읽기 + Part B 제안·자동금지 + Part C config) ──
+  //   암호 원장(체인 rollup·키링·durable nonce·HMAC 서명·receipt)은 v0.7 이월(미구현). 제안 적용 =
+  //   사용자가 F7 편집기로 수동 편집(evalProposal 은 F7 DW11 에서 fail-closed·409 proposal-not-available 유지).
+  //   Part A/B GET = side-effect 0(순수 조회·ingest/서명/append 없음). Part C POST 만 mutating(config RMW).
+
+  // Part C: config 읽기(GET·side-effect 0)·쓰기(POST·mutating → security.ts Host/Origin/token 자동 게이트).
+  //   static 세그먼트 "config" 는 Fastify radix 우선 → `/api/evals/:loop` 파라미터보다 먼저 매칭(loop 오인 없음).
+  app.get("/api/evals/config", async () => loadEvalsConfig());
+  app.post("/api/evals/config", async (req, reply) => {
+    const parsed = EvalsConfigBody.safeParse(req.body);
+    // adoptionStage:4(union 실패)·floor 미만 임계(.min 실패)·미지 필드(strict) → 400(silent-clamp 아님).
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const next = await updateEvalsConfig(parsed.data); // evals 서브객체 원자 RMW(타 필드 보존·뮤텍스)
+    return { ok: true, config: next };
+  });
+
+  // Part A: loop 목록·최근 요약(GET·읽기전용).
+  app.get("/api/evals", async () => listEvalLoops(projectRoot));
+  // Part A: 추세(GET·읽기전용). :loop 은 어댑터가 isSafeSegment 검증(위반 → found:false).
+  app.get<{ Params: { loop: string } }>("/api/evals/:loop", async (req) => loopTrend(projectRoot, req.params.loop));
+  // Part B: 제안 카드(GET·읽기전용 판정·자동 적용 절대 없음). 단계<3·데이터부족 → 비활성 사유.
+  //   static "proposal" 세그먼트가 `/api/evals/:loop/:stage/:run`(4-세그) 보다 얕아 충돌 없음.
+  app.get<{ Params: { loop: string } }>("/api/evals/:loop/proposal", async (req) =>
+    loopProposal(projectRoot, req.params.loop, await loadEvalsConfig()));
+  // Part A: scorecard 상세(GET·읽기전용). 세그먼트는 어댑터가 검증·안전 해석.
+  app.get<{ Params: { loop: string; stage: string; run: string } }>(
+    "/api/evals/:loop/:stage/:run",
+    async (req) => scorecardDetail(projectRoot, req.params.loop, req.params.stage, req.params.run));
 
   app.get("/api/health", async () => ({ ok: true }));
   // /healthz — **비인증 liveness**(/api/ 아니므로 게이트 통과). 런처 멱등 판정용. 데이터 없음.

@@ -1,6 +1,6 @@
-// 셸 — 좌측 사이드바 9화면 내비(§IA: 랜딩 없음, 첫 화면=Overview 대시보드). hash 라우팅(외부 router 무의존).
+// 셸 — 좌측 사이드바 10화면 내비(§IA: 랜딩 없음, 첫 화면=Overview 대시보드·F8 Eval 추가). hash 라우팅(외부 router 무의존).
 import { useState, useEffect, useRef } from "react";
-import { Overview, Build, Agents, Skills, Runs, Docs, Drift, Ops, Settings } from "./screens.js";
+import { Overview, Build, Agents, Skills, Runs, Docs, Drift, Ops, Eval, Settings } from "./screens.js";
 import { probeConnection } from "./api.js";
 import { nextConn, showsReconnecting, backoffMs, READY_POLL_MS, type ConnPhase } from "./connection.js";
 
@@ -13,6 +13,7 @@ const SCREENS = [
   { id: "docs", label: "Docs", C: Docs },
   { id: "drift", label: "Drift", C: Drift },
   { id: "ops", label: "Ops", C: Ops },
+  { id: "eval", label: "Eval", C: Eval },
   { id: "settings", label: "Settings", C: Settings },
 ] as const;
 

@@ -159,3 +159,20 @@ export async function updateConfig(patch: ConfigPatch): Promise<Config_v06> {
     return next;
   });
 }
+
+// F8 Part C(M13): evals 서브객체 전용 원자 RMW. updateConfig 은 정적 patch 라 read-then-write 를 락 밖에서
+//   하면 concurrent evals writer 간 lost-update 가 생긴다(evalsconfig 는 미지 evals 잎 보존 병합 필요).
+//   → 뮤텍스 내부에서 strict read → mutate(evals) → 전 필드 보존 write 로 원자화(형제·미지 top-level·evals
+//   미지 잎 clobber 금지). projectsHome 불변 assert 동일 유지. F3/F7 config writer 와 같은 writeChain 직렬화.
+export async function updateConfigEvals(
+  mutate: (curEvals: Record<string, unknown> | null) => Record<string, unknown> | null,
+): Promise<Config_v06> {
+  return withConfigLock(async () => {
+    const before = await loadConfigFromDiskStrict(); // 손상 config → throw(유효분 덮어쓰기 차단)
+    const next: Config_v06 = { ...before };          // projectRoot/definitionEditEnabled/passthrough 보존
+    next.evals = mutate(before.evals);
+    if (next.projectsHome !== before.projectsHome) throw new Error("projectsHome-mutation-blocked");
+    await writeJsonAtomic(configPath(), next);
+    return next;
+  });
+}
