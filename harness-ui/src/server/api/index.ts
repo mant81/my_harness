@@ -16,8 +16,12 @@ import { RunsQuery } from "../schemas.js";
 import { z } from "zod";
 import { overview as metricsOverview, agents as metricsAgents, skills as metricsSkills, type MetricsOptions } from "../adapters/metrics.js";
 import { MAX_RUNS_SCAN } from "../adapters/runs.js";
-import { isSafeSegment, isSafeDocsSegment } from "../lib/paths.js";
-import { openSafeFile, sendDownload, sendPreview, DOWNLOAD_MAX, VIEW_MAX } from "../lib/servefile.js";
+import { isSafeSegment, isSafeDocsSegment, ARGV_TOKEN } from "../lib/paths.js";
+import { openSafeFile, sendDownload, sendPreview, DOWNLOAD_MAX, VIEW_MAX, CONTEXT_RENDERABLE_EXT } from "../lib/servefile.js";
+import { contextTree, ensureCreatePath } from "../adapters/context.js";
+import { classifyContextPath, deniedContextPath } from "../lib/contextpaths.js";
+import { BuildDraftInput, draftDefinition, BuildGate, type ExecFn } from "../lib/builddraft.js";
+import { safeExec } from "../lib/exec.js";
 import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
 import { cancelRun } from "../supervisor/reconcile.js";
@@ -57,7 +61,14 @@ async function countActiveRuns(projectRoot: string): Promise<number> {
   }).length;
 }
 
-export function registerApi(app: FastifyInstance, projectRoot: string): void {
+export function registerApi(
+  app: FastifyInstance, projectRoot: string, opts: { buildExec?: ExecFn } = {},
+): void {
+  // F10(M15) 빌드 초안 exec 경계(주입 가능·테스트는 mock·실 LLM 미호출). 기본 = safeExec(execFile+argv·shell 금지).
+  const buildExec: ExecFn = opts.buildExec ?? ((cmd, args, eopts) => safeExec(cmd, args, eopts));
+  // HB8 백프레셔 게이트(registerApi 인스턴스별 — draft·create 공통 in-flight 뮤텍스 + draft 쿨다운).
+  const buildGate = new BuildGate();
+
   app.get("/api/runtimes", async () => detectRuntimes());
 
   app.get("/api/harness", async () => harnessInventory(projectRoot));
@@ -209,6 +220,120 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   }
   registerDefRoutes("agent");
   registerDefRoutes("skill");
+
+  // ── F10(M15) 하네스 컨텍스트 관리 + 빌더 — 멀티런타임 읽기(HR)·편집 게이트(HR6)·빌드(HB) ──
+  //   읽기 = 신규 화이트리스트(deniedContextPath·전역 DENY 미수정). 쓰기 = `.claude/agents·skills`+신규만(I8).
+
+  // A121·A129: 멀티런타임 화이트리스트 트리(각 노드 runtime 라벨·MAX_CONTEXT_NODES 바운드·truncated).
+  app.get("/api/context/tree", async () => contextTree(projectRoot));
+
+  // A122: 파일 열람(HR1~HR7). classify(구조 화이트리스트) + deniedContextPath(dot/시크릿/node_modules) →
+  //   openSafeFile(심링크·O_NOFOLLOW·dev/ino·realpath 이중앵커·CSP) 재사용. md/TOML 텍스트 렌더(실행 안 함).
+  app.get<{ Querystring: { path?: string; download?: string } }>("/api/context/file", async (req, reply) => {
+    const parsed = z.string().min(1).max(1024).safeParse(req.query.path);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid-path" });
+    const rel = parsed.data;
+    const segs = rel.split("/").filter((s) => s.length > 0);
+    const c = classifyContextPath(segs);
+    if (!c) return reply.code(400).send({ error: "invalid-path" });          // HR1/HR2 구조 위반
+    if (deniedContextPath(rel)) return reply.code(400).send({ error: "invalid-path" }); // HR2/HR4/HR7 denylist
+    const base = c.baseSegs.length ? join(projectRoot, ...c.baseSegs) : projectRoot;
+    // openSafeFile 은 projectRoot→base 중간 조상을 walk 하지 않음 → 서브루트 앵커 세그먼트를 ancestors 로 전달.
+    const ancestors = c.baseSegs.slice(0, -1).map((_, i) => join(projectRoot, ...c.baseSegs.slice(0, i + 1)));
+    const r = await openSafeFile(projectRoot, base, c.restSegs, {
+      denyPath: deniedContextPath, isSafeSeg: isSafeDocsSegment,
+      ancestors: ancestors.length ? ancestors : undefined,
+    });
+    if (!r.ok) return reply.code(r.code).send({ error: r.error });
+    try {
+      if (req.query.download !== undefined) return await sendDownload(reply, r, DOWNLOAD_MAX);
+      return await sendPreview(reply, r, rel, VIEW_MAX, CONTEXT_RENDERABLE_EXT); // TOML 렌더 포함(A122)
+    } finally { await r.fh.close().catch(() => {}); }
+  });
+
+  // A130·HR6: 편집=Claude 스코프만. 이 라우트는 **아무것도 쓰지 않는다**(I8 — 쓰기 경계 불변). Codex/agy/
+  //   GEMINI.md 편집 시도 → 409 `<runtime>-edit-v0.7`(읽기전용 뷰). `.claude/agents·skills` 정의 → F7 라우트로.
+  const ContextEditBody = z.object({ path: z.string().min(1).max(1024) }).passthrough();
+  app.put("/api/context/edit", async (req, reply) => {
+    const parsed = ContextEditBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const c = classifyContextPath(parsed.data.path.split("/").filter((s) => s.length > 0));
+    if (!c) return reply.code(400).send({ error: "invalid-path" });
+    if (c.runtime === "claude") {
+      // CLAUDE.md(top file) = 읽기전용 컨텍스트(쓰기 라우트 없음). `.claude/agents·skills` **정의 파일만** F7 편집
+      //   대상 → edit-via-f7. references/보조 파일 등 비-정의(정규형 아님)는 F7 편집 불가 → context-file-readonly
+      //   (LOW-2: edit-via-f7 오인 방지 — F7 GET/PUT 은 논리 name→정규 sourcePath 만 편집).
+      const rs = c.restSegs;
+      const isDef =
+        (c.baseSegs[1] === "agents" && rs.length === 1 && rs[0]!.endsWith(".md")) ||
+        (c.baseSegs[1] === "skills" && rs.length === 2 && rs[1] === "SKILL.md");
+      if (c.baseSegs.length === 2 && isDef) return reply.code(409).send({ error: "edit-via-f7", runtime: c.runtime });
+      return reply.code(409).send({ error: "context-file-readonly", runtime: c.runtime });
+    }
+    return reply.code(409).send({ error: `${c.runtime}-edit-v0.7`, runtime: c.runtime });
+  });
+
+  // A124·HB1~HB4·HB7·HB8: 빌드 초안(폼→초안 반환·디스크 미기록). 게이트(definitionEditEnabled) + 백프레셔.
+  app.post("/api/context/build/draft", async (req, reply) => {
+    // MED(R4 codex): 게이트/입력 검증은 백프레셔 게이트 **밖**에서 — exec/LLM 미실행 요청(403 edit-disabled·
+    //   400 bad-input)이 쿨다운(lastDraftMs)을 소비하거나 in-flight 를 점유하지 않게. 유효 요청만 acquire →
+    //   동시성/쿨다운 계약은 실제 exec 시도 간에만 성립(HB8 의미 불변).
+    if (!(await isEditEnabled())) return reply.code(403).send({ error: "edit-disabled" }); // HB7 fail-closed
+    const parsed = BuildDraftInput.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues }); // HB1 bounded
+    const g = buildGate.acquire(true); // HB8 in-flight 뮤텍스 + 쿨다운(유효 요청·exec 진입 직전)
+    if (!g.ok) return reply.code(429).send({ error: g.reason });
+    try {
+      const r = await draftDefinition(parsed.data, buildExec); // HB2 execFile+argv·timeout·maxBuffer·HB4 디스크 미기록
+      if (!r.ok) return reply.code(502).send({ error: r.error });
+      return { ok: true, kind: r.kind, draft: r.draft, applied: false }; // HB4 no-auto-apply(표시만)
+    } finally { buildGate.release(true); }
+  });
+
+  // A125·A126·HB5·HB6: 승인 초안 → 신규 정의 생성(신규 구축·F7 저장 전건 통과). `.claude/agents·skills` 스코프만.
+  const BuildCreateBody = z.object({
+    kind: z.enum(["agent", "skill"]),
+    name: z.string().min(1).max(120),
+    content: z.string().max(1048576),
+  }).strict();
+  app.post("/api/context/build/create", async (req, reply) => {
+    // MED(R4 codex 정합): 게이트/입력 검증은 백프레셔 게이트 밖에서(403/400 은 in-flight 미점유). 유효 요청만 acquire.
+    if (!(await isEditEnabled())) return reply.code(403).send({ error: "edit-disabled" }); // HB7
+    const parsed = BuildCreateBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const { kind, name, content } = parsed.data;
+    if (Buffer.byteLength(content, "utf8") > MAX_DEF_BYTES) return reply.code(400).send({ error: "too-large" });
+    if (!ARGV_TOKEN.test(name) || name.length > 120) return reply.code(400).send({ error: "invalid-name" });
+    // HB6 무결성: canonicalize(strict YAML·완전 스키마·name 불변)·초안 무결성 위반 400(폴리글롯/필수누락).
+    const canon = canonicalizeDefinition(content, kind, name);
+    if (!canon.ok) {
+      if (canon.error === "too-large") return reply.code(400).send({ error: "too-large" });
+      return reply.code(400).send({ error: "integrity", detail: canon.error });
+    }
+    const sourcePath = kind === "agent" ? `.claude/agents/${name}.md` : `.claude/skills/${name}/SKILL.md`;
+    const g = buildGate.acquire(false); // HB8 in-flight 뮤텍스(유효 요청 진입 직전·exec 아님 → 쿨다운 미적용)
+    if (!g.ok) return reply.code(429).send({ error: g.reason });
+    try {
+      return await withDefLock(sourcePath, async () => {
+        // 논리 이름 충돌(기존 claude 정의 존재) → 409.
+        const existing = await resolveDef(kind, name);
+        if (existing.ok) return reply.code(409).send({ error: "name-collision" });
+        // HB5 신규 생성 경로안전(부모 심링크 거부·skill dir mkdir 안전·leaf 미존재 확인).
+        const cp = await ensureCreatePath(projectRoot, kind, name);
+        if (!cp.ok) {
+          // LOW-1: 경로안전 위반 잔여코드(parent-unsafe/mkdir-failed/escape)를 웹 매핑된 path-unsafe 로 정규화.
+          //   invalid-name(400)·name-collision(409) 은 그대로 전달(웹 매핑 존재).
+          const err = (cp.error === "parent-unsafe" || cp.error === "mkdir-failed" || cp.error === "escape")
+            ? "path-unsafe" : cp.error;
+          return reply.code(cp.code).send({ error: err });
+        }
+        // HB6 저장 = F7 경화 원자쓰기(부모 체인 재검증·TOCTOU 스왑 감지) 재사용.
+        try { await writeDefSafe(projectRoot, sourcePath, kind, canon.canonical); }
+        catch { return reply.code(400).send({ error: "path-unsafe" }); }
+        return { ok: true, created: true, sourcePath, pathId: sha256(sourcePath), newHash: sha256(canon.canonical) };
+      });
+    } finally { buildGate.release(false); }
+  });
 
   // DW1/DW8: 게이트 노브 토글(mutating·F3.7 원자 RMW·타 필드 보존). Zod strict boolean(그 외 400).
   const DefEditBody = z.object({ enabled: z.boolean() }).strict();

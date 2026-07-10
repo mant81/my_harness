@@ -62,10 +62,13 @@ export async function resolveBootProjectRoot(deps?: {
 
 // opts.security 미지정(테스트) 시 보안 게이트 없이 API만(단위 테스트 편의). 실서버는 security 주입.
 // opts.projectRoot 미지정 시 모듈 상수(하위호환). 실 부팅은 검증된 effectiveRoot 주입.
-export function buildServer(opts: { security?: SecurityState; projectRoot?: string } = {}) {
+export function buildServer(opts: {
+  security?: SecurityState; projectRoot?: string;
+  buildExec?: import("./lib/builddraft.js").ExecFn; // F10(M15): 빌드 초안 exec 경계 주입(테스트 mock).
+} = {}) {
   const app = Fastify({ logger: false });
   if (opts.security) registerSecurity(app, opts.security);
-  registerApi(app, opts.projectRoot ?? projectRoot);
+  registerApi(app, opts.projectRoot ?? projectRoot, { buildExec: opts.buildExec });
   return app;
 }
 

@@ -1,6 +1,6 @@
 // 셸 — 좌측 사이드바 10화면 내비(§IA: 랜딩 없음, 첫 화면=Overview 대시보드·F8 Eval 추가). hash 라우팅(외부 router 무의존).
 import { useState, useEffect, useRef } from "react";
-import { Overview, Build, Agents, Skills, Runs, Docs, Drift, Ops, Eval, Settings } from "./screens.js";
+import { Overview, Build, Agents, Skills, Context, Runs, Docs, Drift, Ops, Eval, Settings } from "./screens.js";
 import { probeConnection } from "./api.js";
 import { useApi } from "./ui.js";
 import type { DocsSourcesList } from "./api.js";
@@ -11,6 +11,7 @@ const SCREENS = [
   { id: "build", label: "Build", C: Build },
   { id: "agents", label: "Agents", C: Agents },
   { id: "skills", label: "Skills", C: Skills },
+  { id: "context", label: "Context", C: Context }, // F10 M15: 11번째 화면(멀티런타임 컨텍스트 관리 + 빌더·RF5 "정의" 그룹)
   { id: "runs", label: "Runs", C: Runs },
   { id: "docs", label: "Docs", C: Docs },
   { id: "drift", label: "Drift", C: Drift },

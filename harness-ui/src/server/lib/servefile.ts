@@ -15,7 +15,9 @@ export const VIEW_MAX = 1 * 1024 * 1024;      // 미리보기 절단 상한(1MB 
 export const DOWNLOAD_MAX = 8 * 1024 * 1024;  // 다운로드 하드 상한(8MB — ARTIFACT_MAX)
 
 // 렌더 허용 MIME 화이트리스트(md/txt/json/log). 그 외(SVG/HTML/JS 등) = 비렌더·attachment 다운로드만.
-const RENDERABLE_EXT = new Set(["md", "markdown", "txt", "text", "json", "log"]);
+export const RENDERABLE_EXT = new Set(["md", "markdown", "txt", "text", "json", "log"]);
+// F10(M15): 컨텍스트 뷰어는 TOML(.codex/agents/*.toml) 텍스트 렌더 포함(A122·실행 안 함·text/plain).
+export const CONTEXT_RENDERABLE_EXT = new Set([...RENDERABLE_EXT, "toml"]);
 
 export type SafeFile =
   | { ok: false; code: number; error: string }
@@ -130,11 +132,14 @@ export async function sendDownload(reply: FastifyReply, r: Extract<SafeFile, { o
 }
 
 // DV6/DV7/DV8 미리보기: MIME 화이트리스트·바이너리 감지·VIEW_MAX 절단. 원문 텍스트만(sanitize는 클라).
-export async function sendPreview(reply: FastifyReply, r: Extract<SafeFile, { ok: true }>, relPath: string, viewMax: number) {
+export async function sendPreview(
+  reply: FastifyReply, r: Extract<SafeFile, { ok: true }>, relPath: string, viewMax: number,
+  renderableExt: Set<string> = RENDERABLE_EXT,
+) {
   applyFileHeaders(reply);
   const ext = extOf(r.leafName);
   const mime = mimeFor(ext);
-  const renderable = RENDERABLE_EXT.has(ext);
+  const renderable = renderableExt.has(ext);
   const fullSize = r.st.size;
   const base = { path: relPath, name: r.leafName, mime, size: fullSize };
   // 비-화이트리스트 MIME(SVG/HTML/JS 등) = 비렌더·다운로드만(content 미반환).

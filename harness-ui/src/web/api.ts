@@ -375,6 +375,100 @@ export async function postEvalsConfig(body: EvalsConfigPatch): Promise<{ ok: tru
   return r.json() as Promise<{ ok: true; config: EvalsConfigResolved }>;
 }
 
+// ── F10 하네스 컨텍스트 관리 + 빌더(M15·중대) ──
+// 서버 확정 계약(server-builder 완료·이대로 소비):
+//   GET  /api/context/tree                    → ContextTree(topFiles·roots·count·truncated)
+//   GET  /api/context/file?path=<rel>[&download=1] → DocPreview 동형(F5 sendPreview·TOML 포함) / 400·404·413
+//   PUT  /api/context/edit body {path}(아무것도 안 씀·읽기전용 신호) → 409 <runtime>-edit-v0.7|context-file-readonly|edit-via-f7
+//   POST /api/context/build/draft body {kind,domain,role} → 200 {ok,kind,draft,applied:false} / 400·403·429·502
+//   POST /api/context/build/create body {kind,name,content} → 200 {ok,created,sourcePath,pathId,newHash} / 400·403·409·429
+import type {
+  ContextTree, ContextFilePreview, DefKind as CtxDefKind,
+} from "./context.js";
+export type {
+  Runtime, ContextTree, ContextNode, ContextTopFile, ContextRoot, ContextFilePreview,
+  DraftSession, EditTarget, EditDecision,
+} from "./context.js";
+
+export const CONTEXT_TREE_PATH = "/api/context/tree";
+
+// GET 파일 미리보기 경로(useApi 소비). rel 전체를 단일 쿼리값으로 인코딩(서버가 req.query.path.split("/") 재검증).
+export function contextFilePath(rel: string): string {
+  return `/api/context/file?path=${encodeURIComponent(rel)}`;
+}
+
+// 다운로드(413 → DownloadTooLargeError 승격·saveBlob 재사용).
+export function downloadContextFile(rel: string, filename: string): Promise<void> {
+  return saveBlob(`/api/context/file?path=${encodeURIComponent(rel)}&download=1`, filename);
+}
+
+// 400/409 거부를 구조 보존 승격(submitRun/DefEditError 동형) → UI 가 error 코드를 한국어로 매핑(조용한 드롭 금지).
+export class ContextEditError extends Error {
+  constructor(public readonly status: number, public readonly code: string) {
+    super(code);
+    this.name = "ContextEditError";
+  }
+}
+export class BuildError extends Error {
+  constructor(public readonly status: number, public readonly code: string, public readonly detail?: unknown) {
+    super(code);
+    this.name = "BuildError";
+  }
+}
+
+// PUT /api/context/edit — 아무것도 쓰지 않는 읽기전용 신호(서버가 409 <runtime>-edit-v0.7 등 반환·방어용).
+export type ContextEditProbe = { editable: boolean; runtime?: string };
+export async function checkContextEdit(path: string): Promise<ContextEditProbe> {
+  const r = await fetch("/api/context/edit", {
+    method: "PUT",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify({ path }),
+  });
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, "/api/context/edit"); }
+  if (r.status === 409) {
+    const d = await r.json().catch(() => ({} as { error?: string }));
+    throw new ContextEditError(409, String(d.error ?? "409")); // 읽기전용 신호(정상 흐름) — 구조 보존
+  }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string }));
+    throw new ContextEditError(r.status, String(d.error ?? r.status));
+  }
+  return r.json() as Promise<ContextEditProbe>;
+}
+
+export type BuildDraftResult = { ok: true; kind: CtxDefKind; draft: string; applied: false };
+export type BuildCreateResult = { ok: true; created: true; sourcePath: string; pathId: string; newHash: string };
+
+// POST /api/context/build/draft — 초안 생성(디스크 미기록·applied:false). 400/403/429/502 구조 보존 승격.
+export async function postBuildDraft(body: { kind: CtxDefKind; domain: string; role: string }): Promise<BuildDraftResult> {
+  const r = await fetch("/api/context/build/draft", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, "/api/context/build/draft"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
+    throw new BuildError(r.status, String(d.error ?? r.status), d.detail);
+  }
+  return r.json() as Promise<BuildDraftResult>;
+}
+
+// POST /api/context/build/create — 승인 초안 → 신규 정의 생성(디스크 기록). 400/403/409/429 구조 보존 승격.
+export async function postBuildCreate(body: { kind: CtxDefKind; name: string; content: string }): Promise<BuildCreateResult> {
+  const r = await fetch("/api/context/build/create", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, "/api/context/build/create"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
+    throw new BuildError(r.status, String(d.error ?? r.status), d.detail);
+  }
+  return r.json() as Promise<BuildCreateResult>;
+}
+
 // ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
 // healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
 // 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).

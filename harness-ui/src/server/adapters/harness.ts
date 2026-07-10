@@ -276,6 +276,12 @@ export async function harnessInventory(root: string) {
       agents: agents.filter((a) => a.runtime === "codex").length,
       skills: skills.filter((s) => s.runtimePaths.some((p) => p.startsWith(".agents"))).length,
     },
+    // F10(M15·A129): agy 분기(additive). 규칙/컨텍스트=GEMINI.md·스킬=`.agents/skills`(Codex 공유 경로).
+    //   agy 에이전트는 파일규약 없음(SDK subagent) → agents 카운트 없음.
+    agy: {
+      entrypoint: (await exists(join(root, "GEMINI.md"))) ? "GEMINI.md" : null,
+      skills: skills.filter((s) => s.runtimePaths.some((p) => p.startsWith(".agents"))).length,
+    },
     workspace: { exists: await exists(join(root, "_workspace")), runs: (await listDirs(join(root, "_workspace", "runs"))).length },
   };
 }

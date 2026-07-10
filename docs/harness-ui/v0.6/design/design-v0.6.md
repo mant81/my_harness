@@ -567,7 +567,7 @@ Docs(산출물)와 별개로, **하네스를 구성하는 컨텍스트**를 한 
 | ID | 방어 |
 |----|------|
 | HB1 bounded 입력 | 도메인/역할 문자열 길이·문자 상한. **초안 = 데이터**(지시로 흡수 금지·프롬프트 주입 방지) |
-| HB2 exec 규율(I3) | 초안이 CLI 호출이면 `execFile`+argv·**shell 보간 0**·`noFlag`·타임아웃·출력 상한·stdio 로그파일(I2) |
+| HB2 exec 규율(I3) | 초안이 CLI 호출이면 `execFile`+argv·**shell 보간 0**·`noFlag`·타임아웃·출력 상한·stdio 로그파일(I2). **[as-built M15·실측 확정]** claude CLI 도구 완전 비활성 = **`--tools ""`**(설치 `claude --help` 실측: "built-in 도구 전체 비활성"·`--allowedTools`는 사전승인이지 제한 아님·denylist 열거는 불완전) + `--disallowedTools "*"` + `--safe-mode` + **HOME/XDG/cwd 빈 temp 격리**(4층 deny-all·도구 새어도 접근 파일·자격증명 0). **한계:** HOME 격리로 OAuth/keychain 미접근 → **`ANTHROPIC_API_KEY` 인증 필요**(v0.6). 근거: R1~R8 외부감사·`working_history/M15_*` |
 | HB3 읽기전용 입력만 | 초안 생성은 프로젝트 파일 **쓰기 0**·읽기 컨텍스트만 참조(빌드가 실행 트리거 아님) |
 | HB4 no-auto-apply | 초안은 **자동 저장 절대 금지** — diff 표시 → 사람 승인 → 그때만 F7 저장(F8 Part B) |
 | HB5 신규 생성 경로안전(신규 구축) | leaf 미존재 확인·부모 심링크 거부·skill dir `mkdir` escape 거부·이름 충돌 409·`.claude/agents·skills` 스코프 밖 생성 400 |

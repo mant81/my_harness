@@ -13,6 +13,10 @@ import {
   getDefinition, putDefinition, rollbackDefinition, setDefinitionEdit, DefEditError,
   postEvalsConfig, EvalsConfigError,
   docsTreePath, docPreviewPath, postDocsSources, DocsSourcesError,
+  CONTEXT_TREE_PATH, contextFilePath, downloadContextFile,
+  postBuildDraft, postBuildCreate, BuildError,
+  type ContextTree as ContextTreeShape, type ContextNode as CtxNode,
+  type ContextFilePreview,
   type DocsNode, type DocsTree, type DocPreview,
   type DocsSourcesList,
   type SettingsInfo, type ProjectRootPreview,
@@ -33,6 +37,12 @@ import {
   skillNeedsName, skillHasClaudePath, isDirty, rollbackBodyFromSave,
 } from "./defedit.js";
 import { projectRootErrorText, canSave, requiresOrphanChoice, type OrphanChoice } from "./settings.js";
+import {
+  type Runtime, type DefKind as CtxDefKind,
+  runtimeBadgeKind, availableRuntimes, filterContextTree, editDecision, findContextFile,
+  buildErrorText, claudePointerSnippet,
+  saveDraftSession, loadDraftSession, clearDraftSession,
+} from "./context.js";
 import {
   docsSourceErrorText, addSourceRow, removeSourceRow, updateSourceRow, moveSourceRow, canAddSource,
   rowIssue, rowIssueText, rowsLocallyValid, toPayloadSources, dryRunErrorByPath, allSourcesValid,
@@ -2089,5 +2099,272 @@ function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: 
         </ConfirmDialog>
       )}
     </>
+  );
+}
+
+// ── 11. Context (F10 M15 — 멀티런타임 컨텍스트 관리 + 빌더 · A128 · 중대) ──
+// 읽기 트리(런타임 배지·필터)·F5 뷰어 재사용(md/TOML·바이너리·절단)·편집=Claude 정의만(F7 진입)·
+// 빌더(초안→승인→생성·미적용 초안 세션 유지 A107·포인터 스니펫 복사). 빈/로딩/에러 3-state(A82~A84).
+// XSS: 트리·스니펫·초안은 전부 데이터 — 렌더는 React escape / FileViewer 는 DV8 파이프라인만.
+export function Context() {
+  const tree = useApi<ContextTreeShape>(CONTEXT_TREE_PATH);
+  const set = useApi<SettingsInfo>("/api/settings"); // definitionEditEnabled(편집·빌더 게이트·A81)
+  const gateOn = set.data?.definitionEditEnabled === true;
+  return (
+    <div className="screen">
+      <h2>Context</h2>
+      <p className="muted">
+        멀티런타임 하네스 컨텍스트(읽기 전용) + 신규 정의 빌더. 편집은 Claude 정의(<code>.claude/agents·skills</code>)만 가능하며,
+        Codex/agy·CLAUDE/AGENTS/GEMINI.md 는 v0.7 비대상(읽기 전용)입니다.
+      </p>
+      {/* A83: 트리는 자체 3-state. 빌더는 트리 로드 실패·빈 상태와 무관하게 항상 표시(A128) */}
+      <Async state={tree}>{(t) => <ContextBrowser tree={t} gateOn={gateOn} onChanged={tree.reload} />}</Async>
+      <ContextBuilder gateOn={gateOn} onCreated={tree.reload} />
+    </div>
+  );
+}
+
+// 트리(런타임 배지·필터) + 미리보기 + 편집 게이트. isEmpty → "컨텍스트 없음"(빌더는 상위에서 별도 표시).
+function ContextBrowser({ tree, gateOn, onChanged }: { tree: ContextTreeShape; gateOn: boolean; onChanged: () => void }) {
+  const [runtime, setRuntime] = useState<Runtime | null>(null);
+  const [sel, setSel] = useState<string | null>(null);
+  const [editFor, setEditFor] = useState<{ kind: CtxDefKind; name: string } | null>(null);
+  const runtimes = availableRuntimes(tree);
+  const filtered = filterContextTree(tree, runtime);
+  const isEmpty = tree.topFiles.every((f) => !f.present) && tree.roots.every((r) => !r.present);
+  const selNode = sel ? findContextFile(tree, sel) : null;
+  if (isEmpty) return (
+    <div className="empty" role="status">
+      <p className="muted">📂 컨텍스트 없음 — 하네스 구성(<code>.claude</code>/<code>.codex</code>/<code>.agents</code>·CLAUDE.md 등)을 확인하세요.</p>
+    </div>
+  );
+  return (
+    <>
+      {tree.truncated && <p className="banner warn" role="note">✂ 트리 절단 · {tree.count}개까지 표시 · 전체는 파일 시스템에서 확인</p>}
+      <div className="ctx-filterbar" role="group" aria-label="런타임 필터">
+        <span className="muted">런타임 필터:</span>
+        <button className={runtime === null ? "chip on" : "chip"} aria-pressed={runtime === null} onClick={() => setRuntime(null)}>전체</button>
+        {runtimes.map((rt) => (
+          <button key={rt} className={runtime === rt ? "chip on" : "chip"} aria-pressed={runtime === rt} onClick={() => setRuntime(rt)}>{rt}</button>
+        ))}
+      </div>
+      <div className="split">
+        <Card title="컨텍스트 트리 (읽기전용)">
+          <ContextTreeView tree={filtered} selected={sel} onSelect={setSel} />
+        </Card>
+        {sel && selNode
+          ? <ContextFilePanel key={sel} rel={sel} node={selNode} gateOn={gateOn}
+              projectRoot={tree.projectRoot} onEdit={(kind, name) => setEditFor({ kind, name })} />
+          : <Card title="미리보기"><p className="muted">좌측에서 파일을 선택하세요.</p></Card>}
+      </div>
+      {/* F7 정의 편집기 재사용(claude 정의만·독립 3-state) — 저장 시 구조 변경 없음이나 안전상 재조회는 편집기 내부. */}
+      {editFor && <DefinitionEditor key={editFor.kind + ":" + editFor.name} kind={editFor.kind} name={editFor.name}
+        onClose={() => { setEditFor(null); onChanged(); }} />}
+    </>
+  );
+}
+
+// 재귀 노드 목록(읽기전용·키보드) — DocTree 동형. 런타임은 서브루트 단위 균일이라 노드별 배지 생략(그룹 헤더에 표기).
+function ContextTreeView({ tree, selected, onSelect }: { tree: ContextTreeShape; selected: string | null; onSelect: (p: string) => void }) {
+  return (
+    <>
+      <div className="ctx-group">
+        <p className="ctx-group-head muted">프로젝트 컨텍스트 파일</p>
+        {tree.topFiles.length === 0
+          ? <p className="muted">(필터에 맞는 항목 없음)</p>
+          : (
+            <ul className="doctree" role="tree">
+              {tree.topFiles.map((f) => (
+                <li key={f.path} role="none">
+                  {f.present
+                    ? <button role="treeitem" className={"tree-file link" + (f.path === selected ? " on" : "")}
+                        aria-current={f.path === selected ? "true" : undefined} onClick={() => onSelect(f.path)}>
+                        📄 {f.name} <Badge kind={runtimeBadgeKind(f.runtime)}>{f.runtime}</Badge>
+                      </button>
+                    : <span className="muted tree-absent">📄 {f.name} <Badge kind="muted">없음</Badge></span>}
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+      {tree.roots.map((r) => (
+        <div key={r.path} className="ctx-group">
+          <p className="ctx-group-head">
+            <code className="path">{r.path}</code> <Badge kind={runtimeBadgeKind(r.runtime)}>{r.runtime}</Badge>
+            {!r.present && <> <Badge kind="muted">없음</Badge></>}
+          </p>
+          {r.present && (r.children.length > 0
+            ? <ContextNodeList nodes={r.children} selected={selected} onSelect={onSelect} />
+            : <p className="muted">(비어 있음)</p>)}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ContextNodeList({ nodes, selected, onSelect }: { nodes: CtxNode[]; selected: string | null; onSelect: (p: string) => void }) {
+  return (
+    <ul className="doctree" role="tree">
+      {nodes.map((n) => n.type === "dir" ? (
+        <li key={n.path} role="treeitem" aria-expanded="true">
+          <span className="tree-dir">📁 {n.name}</span>
+          {n.children.length > 0 && <ContextNodeList nodes={n.children} selected={selected} onSelect={onSelect} />}
+        </li>
+      ) : (
+        <li key={n.path} role="none">
+          <button role="treeitem" className={"tree-file link" + (n.path === selected ? " on" : "")}
+            aria-current={n.path === selected ? "true" : undefined} onClick={() => onSelect(n.path)}>📄 {n.name}</button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// 파일 미리보기(F5 FileViewer 재사용) + 편집 게이트(A128). editDecision 이 runtime==claude && 정의경로일 때만 활성.
+function ContextFilePanel({ rel, node, gateOn, projectRoot, onEdit }: {
+  rel: string; node: { runtime: Runtime; path: string }; gateOn: boolean; projectRoot: string;
+  onEdit: (kind: CtxDefKind, name: string) => void;
+}) {
+  const prev = useApi<ContextFilePreview>(contextFilePath(rel));
+  const decision = editDecision({ runtime: node.runtime, path: rel, type: "file" }, gateOn);
+  return (
+    <Card title={rel}>
+      <div className="ctx-file-actions detail-actions">
+        {decision.editable
+          ? <button className="primary edit-btn" onClick={() => onEdit(decision.kind, decision.name)}>✎ 정의 편집 (F7)</button>
+          : <span className="muted edit-reason" role="note" title={decision.reason}>🔒 {decision.reason}
+              {!gateOn && <> · <a className="link" href="#/settings">Settings에서 켜기 →</a></>}
+            </span>}
+      </div>
+      {/* A83: 미리보기는 트리와 독립 3-state. md/TOML 렌더·바이너리 안내·절단 배지는 FileViewer(DV8) 내부. */}
+      <Async state={prev}>{(p) => (
+        <FileViewer model={{
+          name: p.name, content: p.content, renderable: p.renderable, binary: p.binary,
+          truncated: p.truncated, size: p.size, localPath: localDocPath(projectRoot, rel, ""),
+          download: () => downloadContextFile(rel, p.name),
+        }} />
+      )}</Async>
+    </Card>
+  );
+}
+
+// 빌더(A124~A127) — 폼→초안(build/draft·디스크 미기록)→편집·승인→생성(build/create). 미적용 초안 세션 유지(A107).
+function ContextBuilder({ gateOn, onCreated }: { gateOn: boolean; onCreated: () => void }) {
+  const restored = useMemo(() => loadDraftSession(), []);
+  const [kind, setKind] = useState<CtxDefKind>(restored?.kind ?? "agent");
+  const [domain, setDomain] = useState(restored?.domain ?? "");
+  const [role, setRole] = useState(restored?.role ?? "");
+  const [name, setName] = useState(restored?.name ?? "");
+  const [draft, setDraft] = useState<string | null>(restored?.draft ?? null);
+  const [drafting, setDrafting] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ sourcePath: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // A107: 폼/초안 변경분을 세션에 지속(탭 전환·리로드에도 유실 방지). 생성 완료 후엔 저장 스킵(clear 유지).
+  useEffect(() => {
+    if (created) return;
+    saveDraftSession({ kind, domain, role, name, draft });
+  }, [kind, domain, role, name, draft, created]);
+
+  const genDraft = async () => {
+    setDrafting(true); setErr(null); setCreated(null);
+    try { setDraft((await postBuildDraft({ kind, domain, role })).draft); }
+    catch (e) { setErr(e instanceof BuildError ? buildErrorText(e.code, e.status) : readErrorText(e)); }
+    finally { setDrafting(false); }
+  };
+
+  const doCreate = async () => {
+    if (draft == null) return;
+    setCreating(true); setErr(null);
+    try {
+      const r = await postBuildCreate({ kind, name, content: draft });
+      setConfirmOpen(false); setCreated({ sourcePath: r.sourcePath });
+      clearDraftSession(); onCreated();
+    } catch (e) {
+      setConfirmOpen(false);
+      setErr(e instanceof BuildError ? buildErrorText(e.code, e.status) : readErrorText(e));
+    } finally { setCreating(false); }
+  };
+
+  const copySnippet = async () => {
+    if (!created) return;
+    try {
+      await navigator.clipboard.writeText(claudePointerSnippet({ kind, name, sourcePath: created.sourcePath }));
+      setCopied(true); setTimeout(() => setCopied(false), 2500);
+    } catch { setCopied(false); }
+  };
+
+  const reset = () => { setDraft(null); setName(""); setDomain(""); setRole(""); setCreated(null); setErr(null); clearDraftSession(); };
+  const targetPath = kind === "agent" ? `.claude/agents/${name}.md` : `.claude/skills/${name}/SKILL.md`;
+
+  return (
+    <Card title="빌더 — 신규 정의 초안·생성 (사람 승인 필수)">
+      {!gateOn && (
+        <p className="banner warn" role="note">🔒 정의 편집(빌더)이 비활성입니다 — 초안 생성·저장이 불가합니다.
+          <a className="link" href="#/settings"> Settings에서 켜기 →</a></p>
+      )}
+      <div className="form">
+        <label>종류(kind)
+          <select value={kind} onChange={(e) => setKind(e.target.value as CtxDefKind)} disabled={!gateOn}>
+            <option value="agent">agent</option><option value="skill">skill</option>
+          </select>
+        </label>
+        <label>이름(name)<input value={name} onChange={(e) => setName(e.target.value)} maxLength={120}
+          placeholder="예: my-agent (첫 글자 영숫자)" disabled={!gateOn} /></label>
+        <label className="full">도메인(domain)<textarea value={domain} onChange={(e) => setDomain(e.target.value)}
+          maxLength={400} rows={2} disabled={!gateOn} /></label>
+        <label className="full">역할(role)<textarea value={role} onChange={(e) => setRole(e.target.value)}
+          maxLength={200} rows={2} disabled={!gateOn} /></label>
+        <button className="primary" disabled={!gateOn || drafting || !domain || !role} onClick={genDraft}>
+          {drafting ? "초안 생성 중…" : "초안 생성 (디스크 미기록)"}
+        </button>
+      </div>
+
+      {/* 400/403/429/502 인라인(조용한 드롭 금지·A128) */}
+      {err && <p className="banner err" role="alert">⚠ {err}</p>}
+
+      {/* 미적용 초안 미리보기 — 편집 가능·승인 전까지 디스크 미기록(A107 세션 유지) */}
+      {draft != null && !created && (
+        <div className="ctx-draft">
+          <p className="muted">📝 초안 미리보기(디스크 미기록·미적용) — 검토·수정 후 승인하세요. frontmatter 의 <code>name:</code> 은 위 이름과 일치해야 합니다(불일치 시 무결성 거부).</p>
+          <label className="def-textarea-label">초안 원문 (편집 가능)
+            <textarea className="def-textarea" value={draft} onChange={(e) => setDraft(e.target.value)}
+              rows={16} spellCheck={false} aria-label="초안 원문 편집" />
+          </label>
+          <div className="def-editor-toolbar">
+            <button className="link" onClick={reset}>초안 폐기</button>
+            <button className="primary" disabled={!gateOn || !name || creating} onClick={() => { setErr(null); setConfirmOpen(true); }}>승인·생성…</button>
+          </div>
+        </div>
+      )}
+
+      {/* 생성 성공 — 편집≠실행 안내 + CLAUDE.md 포인터 스니펫 복사(자동 쓰기 없음·A128) */}
+      {created && (
+        <div className="banner ok" role="status">
+          <p>✓ 생성됨 · <code className="path">{created.sourcePath}</code></p>
+          <p className="muted">이 생성은 정의 파일 기록만 합니다(실행 아님). CLAUDE.md 포인터는 <b>자동 추가되지 않습니다</b> — 아래 스니펫을 복사해 직접 붙여넣으세요.</p>
+          <div className="detail-actions">
+            <button onClick={copySnippet}>📋 CLAUDE.md 포인터 스니펫 복사{copied && " ✓"}</button>
+            <button className="link" onClick={reset}>새 초안 시작</button>
+          </div>
+        </div>
+      )}
+
+      {/* A85: 비가역 파일 생성 확인 다이얼로그 */}
+      {confirmOpen && draft != null && (
+        <ConfirmDialog title="신규 정의 파일 생성 확인" onCancel={() => setConfirmOpen(false)}>
+          <p className="muted">아래 정의 파일을 <b>새로 생성</b>합니다(디스크 기록). 취소하면 어떤 쓰기도 하지 않습니다.</p>
+          <p><code className="path">{targetPath}</code></p>
+          {err && <p className="banner err" role="alert">⚠ {err}</p>}
+          <div className="modal-actions">
+            <button onClick={() => setConfirmOpen(false)} disabled={creating}>취소 (변경 없음)</button>
+            <button className="primary" disabled={creating} onClick={doCreate}>{creating ? "생성 중…" : "생성 (파일 쓰기)"}</button>
+          </div>
+        </ConfirmDialog>
+      )}
+    </Card>
   );
 }
