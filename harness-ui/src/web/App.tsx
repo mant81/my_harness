@@ -8,17 +8,37 @@ import { nextConn, showsReconnecting, backoffMs, READY_POLL_MS, type ConnPhase }
 
 const SCREENS = [
   { id: "overview", label: "Overview", C: Overview },
-  { id: "build", label: "Build", C: Build },
+  { id: "build", label: "New Run", C: Build },   // RF1: "Build" 표시 라벨 → "New Run"(하네스 빌드 혼동 제거)
   { id: "agents", label: "Agents", C: Agents },
   { id: "skills", label: "Skills", C: Skills },
-  { id: "context", label: "Context", C: Context }, // F10 M15: 11번째 화면(멀티런타임 컨텍스트 관리 + 빌더·RF5 "정의" 그룹)
-  { id: "runs", label: "Runs", C: Runs },
+  { id: "context", label: "Context", C: Context },
+  { id: "runs", label: "History", C: Runs },   // 그룹 "실행" 하위 — New Run(시작) ↔ History(과거 실행 기록). id 는 딥링크 보존
   { id: "docs", label: "Docs", C: Docs },
   { id: "drift", label: "Drift", C: Drift },
   { id: "ops", label: "Ops", C: Ops },
   { id: "eval", label: "Eval", C: Eval },
   { id: "settings", label: "Settings", C: Settings },
 ] as const;
+
+// RF6: 사이드바 그룹화(실행/정의/문서/점검/설정) — 평면 나열보다 역할군을 시각화.
+const GROUPS: { label: string; ids: string[] }[] = [
+  { label: "개요", ids: ["overview"] },
+  { label: "실행", ids: ["build", "runs"] },
+  { label: "정의", ids: ["agents", "skills", "context"] },
+  { label: "문서", ids: ["docs"] },
+  { label: "점검", ids: ["drift", "ops", "eval"] },
+  { label: "설정", ids: ["settings"] },
+];
+
+// 테마 토글 — data-theme(prefers-color-scheme 양방향 override) + localStorage 지속.
+type Theme = "light" | "dark";
+function initTheme(): Theme {
+  try {
+    const saved = localStorage.getItem("harness-theme");
+    if (saved === "light" || saved === "dark") return saved;
+  } catch { /* private mode */ }
+  return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 
 // A94 전역 재연결 — healthz 백오프 폴링 상태머신(offline→health-up→ready·401→reauth).
 // 개별 통신 에러 토스트 폭주를 전역 오버레이가 흡수(W-C4). ready 는 저빈도, 그 외는 백오프 재시도.
@@ -77,6 +97,7 @@ export function App() {
   // hash 에서 화면 id 만 추출(딥링크 쿼리 `#/runs?run=<id>` 지원 — `?` 이후는 화면별 소비).
   const idOf = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "overview";
   const [cur, setCur] = useState<string>(idOf);
+  const [theme, setTheme] = useState<Theme>(initTheme);
   const phase = useConnection();
   // A118: docsMenuEnabled=false → 사이드바 Docs 비활성+이유 툴팁. 로드 전엔 활성 가정(플리커 방지). 실패해도 기본 활성.
   const docsSources = useApi<DocsSourcesList>("/api/docs/sources");
@@ -86,22 +107,49 @@ export function App() {
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    try { localStorage.setItem("harness-theme", theme); } catch { /* private mode */ }
+  }, [theme]);
   const active = SCREENS.find((s) => s.id === cur) ?? SCREENS[0];
   const Body = active.C;
+  const byId = (id: string) => SCREENS.find((s) => s.id === id)!;
   return (
     <div className="app">
       <nav className="sidebar">
-        <div className="brand">Harness UI <span className="ver">v0.6</span></div>
-        {SCREENS.map((s) => {
-          // A81/A118: Docs 메뉴 off → 비활성 링크(이유 툴팁·클릭 무효). 빈 disabled 금지 = 사유 명시.
-          if (s.id === "docs" && !docsEnabled) return (
-            <span key={s.id} className="navlink disabled" aria-disabled="true"
-              title="Docs 메뉴가 꺼져 있습니다 · Settings → Docs 소스에서 켜세요">{s.label}</span>
-          );
-          return <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>{s.label}</a>;
-        })}
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">H</span>
+          <span className="brand-name">My Harness Web<span className="ver">v0.6 · local</span></span>
+        </div>
+        {GROUPS.map((g) => (
+          <div key={g.label} className="navgroup">
+            <div className="glabel">{g.label}</div>
+            {g.ids.map((id) => {
+              const s = byId(id);
+              // A81/A118: Docs 메뉴 off → 비활성 링크(이유 툴팁·클릭 무효). 빈 disabled 금지 = 사유 명시.
+              if (s.id === "docs" && !docsEnabled) return (
+                <span key={s.id} className="navlink disabled" aria-disabled="true"
+                  title="Docs 메뉴가 꺼져 있습니다 · Settings → Docs 소스에서 켜세요">{s.label}</span>
+              );
+              return <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>{s.label}</a>;
+            })}
+          </div>
+        ))}
       </nav>
-      <main className="body"><Body /></main>
+      <main className="main">
+        <header className="topbar">
+          <nav className="crumbs" aria-label="위치">
+            <span>My Harness Web</span><span className="sep">/</span><span className="cur">{active.label}</span>
+          </nav>
+          <div className="spacer" />
+          <span className="statuspill"><span className="dot" />{phase === "ready" ? "연결됨" : "재연결 중"}</span>
+          <button className="iconbtn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            title="테마 전환" aria-label="라이트/다크 테마 전환">
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
+        </header>
+        <div className="body"><Body /></div>
+      </main>
       {/* A94: 전역 재연결/재인증 오버레이 — 통신에러 흡수(개별 토스트 폭주 금지·W-C4) */}
       <ConnectionOverlay phase={phase} />
     </div>

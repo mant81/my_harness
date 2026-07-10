@@ -173,63 +173,6 @@ function OverviewMetricsBody({ m }: { m: OverviewMetrics }) {
   );
 }
 
-// W3 Agents usage 섹션(A63) — 독립 로딩(W9). 토큰·호출·연결·선언≠관측 gap·미사용.
-function AgentsUsage() {
-  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
-  const path = useMemo(() => metricsPath("/api/metrics/agents", win, Date.now()), [win]);
-  const m = useApi<AgentsMetrics>(path);
-  return (
-    <Card title="활용도 (선택 기간 관측)">
-      <MetricsWindowBar win={win} onChange={setWin} />
-      <Async state={m}>{(d) => (
-        <>
-          {d.agents.length === 0
-            ? <p className="muted">선택 window 내 관측된 에이전트 없음(미측정 — 부재 단정 아님)</p>
-            : <Table cols={["에이전트", "run", "호출", "완료", "실패", "토큰"]} rows={d.agents.map((a) => [
-                a.agent, a.runs, a.invocations, a.completed, a.failed, <MetricCell mv={a.tokens} fmt="int" />,
-              ])} />}
-          {d.unusedInWindow.length > 0 && (
-            <div className="unused-block" role="note">
-              <p className="muted">🕳 {windowEmptyNotice("agent", d.coverage)}</p>
-              <p>{d.unusedInWindow.map((n) => <Badge key={n} kind="muted">{n}</Badge>)}</p>
-            </div>
-          )}
-          <CoverageNote cov={d.coverage} />
-        </>
-      )}</Async>
-    </Card>
-  );
-}
-
-// W4 Skills usage 섹션(A63) — 호출·점유(estimated 상한)·미사용 목록. 독립 로딩(W9).
-function SkillsUsage() {
-  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
-  const path = useMemo(() => metricsPath("/api/metrics/skills", win, Date.now()), [win]);
-  const m = useApi<SkillsMetrics>(path);
-  return (
-    <Card title="활용도 (선택 기간 관측)">
-      <MetricsWindowBar win={win} onChange={setWin} />
-      <Async state={m}>{(d) => (
-        <>
-          {d.skills.length === 0
-            ? <p className="muted">선택 window 내 관측된 스킬 없음(미측정 — 부재 단정 아님)</p>
-            : <Table cols={["스킬", "run", "호출", "토큰(점유·상한)"]} rows={d.skills.map((s) => [
-                s.skill, s.runs, s.invocations, <MetricCell mv={s.tokens} fmt="int" />,
-              ])} />}
-          {d.skills.length > 0 && <p className="muted"><ConfBadge confidence="estimated" /> 스킬 토큰은 경계 없음 → 상한 추정치(정확값 아님).</p>}
-          {d.unusedInWindow.length > 0 && (
-            <div className="unused-block" role="note">
-              <p className="muted">🕳 {windowEmptyNotice("skill", d.coverage)}</p>
-              <p>{d.unusedInWindow.map((n) => <Badge key={n} kind="muted">{n}</Badge>)}</p>
-            </div>
-          )}
-          <CoverageNote cov={d.coverage} />
-        </>
-      )}</Async>
-    </Card>
-  );
-}
-
 // ── 1. Overview (A2·A3·A35-A38 · F6 W2 효과성 카드) ──
 export function Overview() {
   const inv = useApi<Inv>("/api/harness");
@@ -309,7 +252,8 @@ export function Build() {
   };
   return (
     <div className="screen">
-      <h2>Build</h2>
+      <h2>New Run</h2>
+      <p className="lead">새 실행을 시작한다(에이전트 빌드 아님) — 작업을 정해 codex/claude를 실행하면 run이 생성되고 <a className="link" href="#/runs">History</a>에서 관찰한다.</p>
       <Card title="실행 요청 (미리보기 기본)">
         <div className="form">
           <label>런타임<select value={runtime} onChange={(e) => setRuntime(e.target.value as "codex" | "claude")}><option value="codex">codex</option><option value="claude">claude</option></select></label>
@@ -325,7 +269,7 @@ export function Build() {
         {result && result.dryRun === false && (
           <p className="banner ok" role="status">
             ✅ 실행을 시작했습니다 · <code className="path">{result.runId}</code>
-            {" "}<a className="link" href={runsDeepLink(result.runId)}>→ Runs에서 관찰</a>
+            {" "}<a className="link" href={runsDeepLink(result.runId)}>→ History에서 관찰</a>
           </p>
         )}
         {out && <pre className="out">{out}</pre>}
@@ -346,36 +290,56 @@ export function Agents() {
   return (
     <div className="screen">
       <h2>Agents</h2>
+      <p className="lead">에이전트를 선택해 역할·연결 스킬을 보고, 요청(New Run)하거나 정의를 편집한다.</p>
       <Async state={st}>{(d) => (
-        <div className="split">
-          <Table cols={["이름", "런타임", "역할"]} rows={d.agents.map((a) => [
-            <button className="link" onClick={() => setSel(a.name)}>{a.name}</button>, a.runtime, (a.role || "—").slice(0, 60),
-          ])} />
-          {sel && (() => { const a = d.agents.find((x) => x.name === sel); return a ? (
-            <Card title={a.name}>
-              <p className="muted">{a.sourcePath} · {a.runtime}</p>
-              <p>{a.role || "(설명 없음)"}</p>
-              {a.skills.length > 0 && <p>스킬: {a.skills.join(", ")}</p>}
-              <div className="detail-actions">
-                {/* F2 W1/A67: 프리필 New Run 진입점(라벨 RF2 정합) */}
-                <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
-                {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex → 비활성 + 이유 툴팁 + Settings 딥링크) */}
-                <EditButton
-                  reason={!gateOn ? "정의 편집이 비활성입니다" : a.runtime !== "claude" ? "Codex 에이전트 정의 편집은 현재 지원하지 않습니다" : null}
-                  showSettingsLink={!gateOn}
-                  onEdit={() => setEditFor(a.name)}
-                />
-              </div>
-            </Card>
-          ) : null; })()}
+        <div className="md-layout">
+          {/* 스캔 쉬운 선택 리스트(이름·런타임 배지·역할 발췌·스킬 수) */}
+          <div className="itemlist" role="list">
+            {d.agents.length === 0 && <p className="muted">에이전트 없음</p>}
+            {d.agents.map((a) => (
+              <button key={a.name} role="listitem" className={a.name === sel ? "item on" : "item"}
+                aria-current={a.name === sel} onClick={() => setSel(a.name)}>
+                <span className="item-top">
+                  <span className="item-name">{a.name}</span>
+                  <span className="badge muted">{a.runtime}</span>
+                </span>
+                <span className="item-meta">{a.role || "(설명 없음)"}</span>
+                {a.skills.length > 0 && <span className="item-meta">스킬 {a.skills.length}개</span>}
+              </button>
+            ))}
+          </div>
+          {/* 상세(스티키) — 미선택 시 빈 상태 안내 */}
+          <div className="detail-sticky">
+            {sel ? (() => { const a = d.agents.find((x) => x.name === sel); return a ? (
+              <Card title={a.name}>
+                <p className="muted">{a.sourcePath} · {a.runtime}</p>
+                <p>{a.role || "(설명 없음)"}</p>
+                {a.skills.length > 0 && (
+                  <div className="chipset" aria-label="연결 스킬">
+                    {a.skills.map((sk) => <span key={sk} className="chip-soft">{sk}</span>)}
+                  </div>
+                )}
+                <div className="detail-actions">
+                  {/* F2 W1/A67: 프리필 New Run 진입점(라벨 RF2 정합) */}
+                  <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
+                  {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex → 비활성 + 이유 툴팁 + Settings 딥링크) */}
+                  <EditButton
+                    reason={!gateOn ? "정의 편집이 비활성입니다" : a.runtime !== "claude" ? "Codex 에이전트 정의 편집은 현재 지원하지 않습니다" : null}
+                    showSettingsLink={!gateOn}
+                    onEdit={() => setEditFor(a.name)}
+                  />
+                </div>
+              </Card>
+            ) : null; })() : (
+              <div className="detail-empty" role="note">← 왼쪽에서 에이전트를 선택하면 상세·요청·편집이 열립니다.</div>
+            )}
+            {/* F7 A80/A83: 편집기 인라인 — 상세 컬럼 안에서 펼침(자체 Card·3-state 유지·실패 격리) */}
+            {editFor && <DefinitionEditor key={"agent:" + editFor} kind="agent" name={editFor} onClose={() => setEditFor(null)} />}
+          </div>
         </div>
       )}</Async>
-      {/* F2 W1/A83: 프리필 폼은 상세 카드와 독립 카드로 렌더 — run-template 로드 실패가 Agents 화면 전체를 무너뜨리지 않음 */}
+      {/* F2 W1/A83: 프리필 폼은 독립 카드로 렌더 — run-template 로드 실패가 Agents 화면 전체를 무너뜨리지 않음 */}
       {runFor && <AgentRunForm key={runFor} name={runFor} onClose={() => setRunFor(null)} />}
-      {/* F7 A80/A83: 편집기는 독립 카드(3-state·로드/저장/rollback 실패가 화면 전체 미붕괴) */}
-      {editFor && <DefinitionEditor key={"agent:" + editFor} kind="agent" name={editFor} onClose={() => setEditFor(null)} />}
-      {/* F6 W3: usage 섹션은 자체 metrics/agents 페치로 독립 로딩(W9/A83) */}
-      <AgentsUsage />
     </div>
   );
 }
@@ -490,7 +454,7 @@ function AgentRunFormBody({ template }: { template: RunTemplate }) {
       {/* A100: 서버 거부(400 unauthorized-tool·409 agent-definition-changed) 인라인 — 조용한 드롭 아님 */}
       {err && <p className="banner err full" role="alert">⚠ {err}</p>}
 
-      {/* A87: 제출 성공 착지 배너 + runId 딥링크(→ Runs에서 관찰) */}
+      {/* A87: 제출 성공 착지 배너 + runId 딥링크(→ History에서 관찰) */}
       {result && (result.dryRun
         ? <div className="banner full" role="status">
             <p>👁 미리보기(파일 미기록) · runId <code className="path">{result.runId}</code></p>
@@ -498,7 +462,7 @@ function AgentRunFormBody({ template }: { template: RunTemplate }) {
           </div>
         : <div className="banner ok full" role="status">
             <p>✓ 실행이 생성되었습니다 · runId <code className="path">{result.runId}</code></p>
-            <a className="link" href={runsDeepLink(result.runId)}>→ Runs에서 관찰</a>
+            <a className="link" href={runsDeepLink(result.runId)}>→ History에서 관찰</a>
           </div>)}
     </div>
   );
@@ -514,32 +478,47 @@ export function Skills() {
   return (
     <div className="screen">
       <h2>Skills</h2>
+      <p className="lead">스킬을 선택해 트리거·설명·참조를 보고, 정의를 편집한다.</p>
       <Async state={st}>{(d) => (
-        <div className="split">
-          <Table cols={["이름", "트리거(발췌)"]} rows={d.skills.map((s) => [
-            <button className="link" onClick={() => setSel(s.name)}>{s.name}</button>, (s.triggers || "—").slice(0, 80),
-          ])} />
-          {sel && (() => { const s = d.skills.find((x) => x.name === sel); return s ? (
-            <Card title={s.name}>
-              <p className="muted">{s.runtimePaths.join(", ")}</p>
-              <p>{s.description || "(설명 없음)"}</p>
-              {s.references.length > 0 && <p>참조: {s.references.join(", ")}</p>}
-              <div className="detail-actions">
-                {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex-only → 비활성 + 이유 툴팁 + Settings 딥링크) */}
-                <EditButton
-                  reason={!gateOn ? "정의 편집이 비활성입니다" : !skillHasClaudePath(s.runtimePaths) ? "Codex 전용 스킬 정의 편집은 현재 지원하지 않습니다" : null}
-                  showSettingsLink={!gateOn}
-                  onEdit={() => setEditFor(s.name)}
-                />
-              </div>
-            </Card>
-          ) : null; })()}
+        <div className="md-layout">
+          <div className="itemlist" role="list">
+            {d.skills.length === 0 && <p className="muted">스킬 없음</p>}
+            {d.skills.map((s) => (
+              <button key={s.name} role="listitem" className={s.name === sel ? "item on" : "item"}
+                aria-current={s.name === sel} onClick={() => setSel(s.name)}>
+                <span className="item-top"><span className="item-name">{s.name}</span></span>
+                <span className="item-meta">{s.triggers || s.description || "(설명 없음)"}</span>
+              </button>
+            ))}
+          </div>
+          <div className="detail-sticky">
+            {sel ? (() => { const s = d.skills.find((x) => x.name === sel); return s ? (
+              <Card title={s.name}>
+                <p className="muted">{s.runtimePaths.join(", ")}</p>
+                <p>{s.description || "(설명 없음)"}</p>
+                {s.triggers && <p className="item-meta">트리거: {s.triggers}</p>}
+                {s.references.length > 0 && (
+                  <div className="chipset" aria-label="참조">
+                    {s.references.map((r) => <span key={r} className="chip-soft">{r}</span>)}
+                  </div>
+                )}
+                <div className="detail-actions">
+                  {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex-only → 비활성 + 이유 툴팁 + Settings 딥링크) */}
+                  <EditButton
+                    reason={!gateOn ? "정의 편집이 비활성입니다" : !skillHasClaudePath(s.runtimePaths) ? "Codex 전용 스킬 정의 편집은 현재 지원하지 않습니다" : null}
+                    showSettingsLink={!gateOn}
+                    onEdit={() => setEditFor(s.name)}
+                  />
+                </div>
+              </Card>
+            ) : null; })() : (
+              <div className="detail-empty" role="note">← 왼쪽에서 스킬을 선택하면 상세·편집이 열립니다.</div>
+            )}
+            {/* F7 A80/A83: 편집기 인라인 — 상세 컬럼 안에서 펼침(자체 Card·3-state·실패 격리) */}
+            {editFor && <DefinitionEditor key={"skill:" + editFor} kind="skill" name={editFor} onClose={() => setEditFor(null)} />}
+          </div>
         </div>
       )}</Async>
-      {/* F7 A80/A83: 편집기는 독립 카드(3-state) */}
-      {editFor && <DefinitionEditor key={"skill:" + editFor} kind="skill" name={editFor} onClose={() => setEditFor(null)} />}
-      {/* F6 W4: usage 섹션은 자체 metrics/skills 페치로 독립 로딩(W9/A83) */}
-      <SkillsUsage />
     </div>
   );
 }
@@ -805,7 +784,8 @@ export function Runs() {
   const chips = activeChips(filter);
   return (
     <div className="screen">
-      <h2>Runs</h2>
+      <h2>History</h2>
+      <p className="lead">실행된 run 기록을 조회·필터·검색·관찰한다(읽기 전용 — 새 실행은 <a className="link" href="#/build">New Run</a>).</p>
       {/* A87: New Run 딥링크 착지 배너(방금 생성한 run 관찰) */}
       {focus && sel === focus && (
         <div className="banner ok" role="status">👁 방금 생성한 run 을 관찰 중 · <code className="path">{focus}</code></div>
@@ -1233,8 +1213,8 @@ function DocsBrowser({ payload }: { payload: DocsSourcesList }) {
         </label>
         <a className="link doc-source-manage" href="#/settings">소스 관리(Settings) →</a>
       </div>
-      <div className="split">
-        {/* A83: 트리 패널은 미리보기와 독립 로딩. 미리보기 실패가 트리를 무너뜨리지 않음 */}
+      <div className="split resizable">
+        {/* A83: 트리 패널은 미리보기와 독립 로딩. 미리보기 실패가 트리를 무너뜨리지 않음. 좌측 트리 최소폭 기본·마우스 리사이즈. */}
         <Card title={`문서 트리 · ${rootLabel} (읽기전용)`}>
           <Async state={tree}>{(t) => t.tree.length === 0 ? (
             <div className="empty" role="status"><p className="muted">📂 이 소스에 문서 없음</p></div>
@@ -2148,7 +2128,7 @@ function ContextBrowser({ tree, gateOn, onChanged }: { tree: ContextTreeShape; g
           <button key={rt} className={runtime === rt ? "chip on" : "chip"} aria-pressed={runtime === rt} onClick={() => setRuntime(rt)}>{rt}</button>
         ))}
       </div>
-      <div className="split">
+      <div className="split resizable">
         <Card title="컨텍스트 트리 (읽기전용)">
           <ContextTreeView tree={filtered} selected={sel} onSelect={setSel} />
         </Card>
