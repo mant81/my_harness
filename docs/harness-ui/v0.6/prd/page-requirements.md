@@ -1,8 +1,8 @@
 # Harness UI v0.6 — 페이지별 기능요구사항 & 역할 경계 명세 (관측 심화 재편)
 
-> 목적: 9개 페이지(v0.5 8화면 + **F8 Eval**)의 **역할 경계**를 못박아 "어디서 실행하고 어디서 관찰하나"의 혼란을 제거한다.
+> 목적: **11개 페이지**(v0.5 8화면 + Docs 뷰어 + **F8 Eval** = as-built 10 → **F10 Context** 추가 11)의 **역할 경계**를 못박아 "어디서 실행하고 어디서 관찰하나"의 혼란을 제거한다. (F9는 신규 페이지 0 — Docs·Settings 확장.)
 > 재편(확정): v0.6 = **관측·통제 패널 심화**. **대화형 채팅(구 F1) 폐기 → v0.7 이월**(설계서 §F1-폐기결정). 대화는 터미널이 우월. Web은 **CLI가 못 하는 교차-run 관측**(Runs 조회/필터/검색·문서/artifact 뷰어·관측성 계층 B)에 집중.
-> 근거: `../design/design-v0.6.md`(A47-A71·UI 배선 F4.5/F5.4/F6.5/F2.4/F3.6), 정본 `../../v0.5/design/design-v0.5-final.md`(8화면 IA·A1-A46), 코드 `harness-ui/src/web/screens.tsx`.
+> 근거: `../design/design-v0.6.md`(A47-A130·UI 배선 F4.5/F5.4/F6.5/F2.4/F3.6/F7.5/F8/F9.5/F10.6), 정본 `../../v0.5/design/design-v0.5-final.md`(8화면 IA·A1-A46), 코드 `harness-ui/src/web/screens.tsx`(as-built 10화면 — Docs·Eval 포함).
 
 ## 0. 핵심 멘탈모델 (한 문장)
 > **Build·Agents = "새 run 시작"(문맥 0에서 실행 제출, 최초 1회). 나머지 7개 페이지는 실행하지 않는다(조회·관찰·평가·설정). 대화형 후속은 없다 — 이어서 대화하려면 터미널을 쓴다.**
@@ -23,7 +23,7 @@
 
 ---
 
-## 2. 페이지별 명세 (9화면 · v0.5 8 + F8 Eval)
+## 2. 페이지별 명세 (11화면 · v0.5 8 + Docs 뷰어 + F8 Eval = as-built 10 → F10 Context 11)
 
 ### 2.1 Overview — **관측성 계층 B 홈 + 문서 뷰어 진입(F6·F5)**
 - **목적:** 하네스 **한눈 현황판**(계층 A) + **효과성 집계**(계층 B) + 결과서 열람 진입.
@@ -87,7 +87,8 @@
 - **v0.6 추가:** **projectRoot 편집 폼(A68-A71·A101):** 경로 입력 → 검증(정규화·realpath·**projectsHome 하위 세그먼트만 심링크/reparse 거부**(절대 상위는 containment·R2-#6)·시스템경로차단·**단일 projectsHome containment 경계**·마커=심층방어·TOCTOU) → **`dryRun` 프리뷰(디스크 미변경·검증+활성 run 경고)→확인(A99 취소/승인)→실제 쓰기**(취소 시 config 무변경·UX-R4-#2) → `<state_home>/config.json` 지속(필드 보존 RMW) → **재시작 후 반영**. **경계는 프로비저닝(설치/env)·편집 폼 확장 불가·미프로비저닝 시 편집 비활성**.
 - **v0.6 추가(F7 연계):** **`definitionEditEnabled` 스코프 토글**(기본 off) — on 시 Agents/Skills 정의 편집 활성(F7·A78). 파일수정 전면 API(`mutationEnabled`)와 **별개 축**(F7만 여는 좁은 노브).
 - **하지 않는 것(경계):** **즉시 적용 아님**(재시작 필요 — 라이브 재바인딩 v0.7 비목표). 파일수정 전면 API(mutationEnabled) 여전히 비활성. 임의 시스템 경로 지정 불가(D4·projectsHome containment 차단).
-- **관계:** 변경 후 재시작 → 전 페이지가 새 projectRoot 기준으로 재로드.
+- **v0.6 추가(F9·A113-A119):** **Docs 소스 편집기** — 소스 다중 등록(라벨+경로·기본 `docs`)·추가/삭제/재정렬·`dryRun` 검증(존재·containment·denylist·DS6)·인라인 에러 + **`docsMenuEnabled` 토글**(off→Docs 메뉴 숨김/비활성). config additive(`docsSources`/`docsMenuEnabled`·per-leaf 복구·F3.7 RMW·프로젝트 파일 무변경).
+- **관계:** 변경 후 재시작 → 전 페이지가 새 projectRoot 기준으로 재로드. Docs 소스 변경은 재시작 없이 반영(config 읽기전용 소비).
 
 ### 2.9 Eval — **평가 대시보드·자기개선 제안·지표관리(F8·9번째 화면·A102-A112)**
 - **목적:** 하네스 self-eval(`loop_scorecard`)을 UI로 — (A) 평가 결과 확인 (B) 자기개선 제안 (C) 평가지표 관리.
@@ -97,6 +98,14 @@
   - **Part C 지표관리(mutating·A109-A111):** 채택 단계(**쓰기 1-3만·4 display-only 잠금·비활성 사유만 표시**)·per-metric·임계·정규화. 저장=F3.7 **per-leaf 독립 복구(형제 보존)+effective=max(값,floor)**·fail-closed. **UX(UX-R1-#4): 입력 옆 최소 30/10/3 상시 표시·floor 미만 저장 전 인라인 거부(silent clamp 금지)·old→new/effective diff·적용값 피드백**·**확인 대상=단계 3 전환 + 지표/정규화 변경(Stage 4는 확인 아니라 잠금)**.
 - **하지 않는 것(경계·중요):** **자동 개선 아님 — 제안만**(자동 적용 절대 금지·**Stage 4 쓰기 없음·display-only**·사람 승인 F7 별도 저장·Goodhart 방지). **`alignment_score`를 품질/정밀도로 표시 안 함.** scorecard 텍스트를 **지시로 흡수 안 함**(데이터일 뿐). 생성물 품질평가(`artifact_benchmark`)는 **v0.7**(혼합 안 함). scorecard **생성** 안 함(스크립트 소관)·**GET은 side-effect 0**(ingest=서명 rollup append는 서버 백그라운드 잡·GET 부작용 아님·R3). **no-auto-apply 경계에 `tools`·`skills` 포함**(위험 tool 자동주입 차단).
 - **관계:** 제안 승인 → **F7 편집기**(에이전트/스킬 반영). 지표관리 저장 → 공유 config(F3.7·Settings 토글과 동일 파일). 사이드바 **"점검" 그룹**(Overview·Drift·Ops·Eval·RF5).
+
+### 2.10b Context — **하네스 컨텍스트 관리 + 에이전트/스킬 빌더(F10·11번째 화면·A121-A130)**
+- **목적:** 하네스 구성 컨텍스트를 한 곳에서 — (**멀티런타임 읽기**) Claude(`.claude/agents·skills`·CLAUDE.md)+Codex(`.codex/agents` TOML·`.agents/skills`)+Antigravity/agy(`.agents/skills`·GEMINI.md)+**AGENTS.md(codex/agy 공유)** 트리·뷰어·런타임 배지(CLAUDE.md=claude·GEMINI.md=agy·AGENTS.md=codex/agy) / (편집·**Claude만**) 에이전트·스킬 정의 = F7 재사용·Codex/agy=읽기전용 뷰(409) / (빌드) 폼 AI 초안→승인→신규 생성. 산출물(Docs)과 분리 — **고정 기능·특정 프로젝트 즉시 사용**. **v0.6 범위=에이전트·스킬+CLAUDE/AGENTS/GEMINI.md만**(plugins·hooks·rules 서브디렉토리·`.claude-plugin`=v0.7 비목표).
+- **읽기(A121·A122·A129·멀티런타임):** 멀티런타임 화이트리스트(HR1: CLAUDE/AGENTS/GEMINI.md·`.claude/agents·skills`·`.codex/agents`·`.agents/skills`)·**`.claude`·`.codex`·`.agents` 3 dot-dir만 정밀 허용**(HR2·`.env`/`.git`/`.ssh`/`.gemini`·홈 전역·`.codex/config` 거부)·전 세그먼트 심링크/reparse 거부(HR3)·secret denylist(HR4)·md/TOML 텍스트 렌더=F5 DV8(HR5)·**트리 `MAX_CONTEXT_NODES` 상한+`node_modules`/`venv`/`__pycache__`/`dist` 대량 dir 차단·초과 시 `truncated:true`(HR7·OOM 방어)**·런타임 배지.
+- **편집(A123·A130·Claude만):** F7 GET/PUT/rollback 재사용(DW1~DW11·`definitionEditEnabled` 게이트)·`.claude/agents·skills`만. **CLAUDE/AGENTS/GEMINI.md·Codex(`.codex`·`.agents/skills`)·agy=읽기전용**(편집 → `409 <runtime>-edit-v0.7`)·하네스 포인터 등록은 **스니펫 복사 안내**.
+- **빌드(A124~A126):** 폼(도메인·역할)→초안(디스크 미기록·bounded·**초안=데이터**·주입 방지·HB1~HB4)→diff→**사람 승인→F7 저장(canonicalize+무결성+원자+낙관 동시성·자동 적용 0)**→신규 생성(leaf 미존재·부모 심링크 거부·이름충돌 409·스코프 밖 400·**신규 구축**·HB5·HB6). **게이트 HB7(`definitionEditEnabled` off면 비활성)·HB8(초안·저장 in-flight 동시 1개·429·쿨다운·비용폭주/DoS 차단).** HB 번호는 설계 §F10.4 표 기준(HB1~HB8).
+- **하지 않는 것(경계):** 풀 팩토리 오케스트레이션(팀 spawn·자동 다파일 생성)=v0.7·CLAUDE.md/AGENTS.md 자동 쓰기 0·초안 자동 적용 0·**빌드=실행 아님**(초안 생성이 파일쓰기/실행 트리거 안 함). **쓰기 스코프=`.claude/agents·skills`+신규 생성만(I8 경계)**.
+- **UX:** "미적용 초안" 세션 유지(A107 준용·유실 방지)·빈/로딩/에러 3-state·접근성(A128). 사이드바 **"정의" 그룹**(Skills·Context·RF5 확장).
 
 ---
 
@@ -117,6 +126,7 @@
 | 뷰어(공유) | 파일 0→"문서 없음" | 파일 로드 스피너 | 열람 거부(경로/바이너리) 사유 메시지(A89)·**다운로드 413→"파일 너무 큼·로컬에서 열기"+로컬 절대경로(A98)** | 트리·브레드크럼·크기초과 "미리보기 잘림·다운로드"·마크다운↔raw 토글(A89) |
 | F7 편집기 | — | 저장 중 로딩 | **409→편집분 보존+병합 뷰(자동 재로드·유실 금지·A93)**·400 무결성 인라인·403 게이트(A86) | **diff 미리보기·미저장 이탈 경고·저장 토스트**(A85·A86) |
 | Eval(F8) | **미실행→"평가 루프 아직 실행 안 됨"(고장 아님)+실행/문서 CTA·`eval-unavailable`→원인(jq 부재)+설치·재시도·데이터 부족→"N회 더 필요"**(A104·UX-R1-#1) | 추세 카드 스켈레톤(카드 독립) | 열람 거부·**ingest=서버 재도출-후-서명(precomputed 거부·자기일관 위조 격리·R7)·과거=rollup digest(회전 무브릭·R5)·추세는 신뢰 rollup(`_workspace`=미검증·digest 불일치=상세 "변조" 툴팁 "로컬 변경·원장 무결·게이트 영향 없음"·A102)**·401·재시도 | **무결성 상태=영향+복구(UX-R1-#2·UX-R2·UX-R3): "상세 파일 불일치—게이트 안전"·"rollup 훼손—제안 차단 + 진단(실패 엔트리/seq/head)·복구 CTA "원장 재구축·재검증"(독립 서명 receipt keyId·키링 재검증 통과분서 재생성·미검증 `_workspace` 재신뢰 금지·독립 소스 전무 시 재구축 불가+명시 리셋만)"·격리 건수/원인**·**alignment≠품질+null(A103)**·**제안 CTA="편집기에서 검토·저장"·"미적용" 유지(승인≠반영·유실 방지·A107)**·**게이트=rollup만(gate-time `_workspace` 재읽기 없음·R6·A106)**·**임계 최소 30/10/3 상시 표시·floor 미만 인라인 거부·effective diff(UX-R1-#4·A110)**·**확인=단계 3 전환+지표/정규화 변경·Stage 4=잠금 사유만(A85·A108·A111)** |
+| Context(F10) | 컨텍스트 0→"CLAUDE.md·에이전트·스킬 없음·하네스 확인"·빌드 폼 항상 표시(빈 아님) | 트리·뷰어 스켈레톤(독립 로드) | 열람 거부(화이트리스트 밖/dotfile/홈 전역) 사유·**바이너리(png 등)→"미리보기 불가·다운로드"(F5 A89 준용·400 오인 금지)**·**트리 절단(`MAX_CONTEXT_NODES` 초과·`node_modules`류 차단)→"일부 생략" 배지(HR7)**·빌드 초안 실패(exec 타임아웃/429 `build-in-progress`)→재시도 안내·401 재인증 | **런타임 배지·필터(claude/codex/agy·A129)**·**편집·빌드 비활성 시 "Settings에서 `definitionEditEnabled` 켜기" 툴팁(A81)**·**Codex/agy/GEMINI.md=읽기전용 배지("편집 v0.7"·409·A130)**·**"미적용 초안" 유지(클라이언트 세션·유실 방지·A107)**·**CLAUDE/AGENTS/GEMINI.md=읽기전용(포인터는 "스니펫 복사")**·diff 승인 확인+저장 토스트(A85·A86)·**빌드 동시 1개(HB8)** |
 
 ---
 
@@ -145,7 +155,7 @@
 - **외부감사 R2 반영:** #6 Settings(2.8) 심링크 거부를 **projectsHome 하위 세그먼트로 한정**(절대 상위는 containment). F7 백업 opaque·strict YAML·pathId·롤백 계약·게이트 fail-closed는 design DW/A72-A80에 반영.
 - **외부감사 R3 반영:** #1 Runs(2.5) 열거를 이름 열거→정렬→상위 N read(무작위 절단 정정). #4 Settings(2.8) D2 realpath 절대상위 변경 허용. F7 differential 게이트·공유 config RMW는 design에 반영.
 - **외부감사 R4 반영:** #1 Runs(2.5) 정렬키를 **`fs.stat` birthtime/mtime**로(runId 형식 무의존·UUID/`run-10`도 정확). #2 F7 편집기 **본문 `---`(수평선·코드펜스) ACCEPT**(R3 과교정 철회). #3 F7 편집기 **옵션필드(role/tools 등)·미지필드 보존**(필수만 검증). #4 config **필드별 파싱**·#5 F7 differential 게이트 **실행가능 명세(F7.8)**는 design DW5/F3.7/F7.8/A50-A51/A71/A75/A78에 반영. design 위협 스위트 58+와 재정합.
-- **UX 축 반영:** §2.9 화면별 UX 상태 명세(전역+9화면)·RF1-RF6 채택 확정. design **A81-A99(UX 수용기준 19개)**와 정합. 기능계약(A47-A80) 무변경.
+- **UX 축 반영:** §2.9 화면별 UX 상태 명세(전역+화면)·RF1-RF6 채택 확정. design **A81-A101(UX 수용기준 21개·UX-R4로 A100/A101 편입)**와 정합. 기능계약(A47-A80) 무변경.
 - **UX-R1(agy) 반영:** 전역 재연결(A94)·Runs 절단 고지(A95)·F7 409 편집분 보존(A93).
 - **UX-R2(codex+agy) 반영:** 전역 **재연결 상태머신+401 갭(A94 강화)**·전역 **런타임 미설치 배너(A97)**·New Run **제출 비활성(A97)**·Settings **첫 실행 프로비저닝(A97)·활성 run 취소/헤드리스 선택(A99)**·뷰어 **413 로컬 경로(A98)**·Runs **기간 파티셔닝 도달(A96)**·Overview/Skills **"dead"→"window 관측 없음+커버리지"(A90 강화)**. 다수가 앞선 보안수정의 UX 부작용 정정.
 - **UX-R3(codex·agy 수렴) 반영:** Runs **기간(from/to) 시각 도메인을 "기록 시각(FS)" 단일 도메인으로 통일**(A96·R3-#1)·manifest `createdAt` 상세 병기.

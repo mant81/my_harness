@@ -1,5 +1,6 @@
-# Harness UI v0.6 — 설계서 (관측 심화: F4 Runs 조회·필터·검색 · F5 문서/artifact 뷰어 · F6 관측성 계층 B · F2 에이전트 프리필 New Run · F3 projectRoot 편집)
+# Harness UI v0.6 — 설계서 (관측 심화 + 편집기 + 평가 + 컨텍스트 관리: F4 Runs 조회·필터·검색 · F5 문서/artifact 뷰어 · F6 관측성 계층 B · F2 에이전트 프리필 New Run · F3 projectRoot 편집 · F7 정의 편집기 · F8 Eval(평가·자기개선·지표관리) · F9 Docs 소스 설정 · F10 하네스 컨텍스트 관리 + 에이전트/스킬 빌더)
 
+> **후속 편입(2026-07-10·실사용 피드백):** F9(Docs 소스 설정)·F10(하네스 컨텍스트 관리+빌더) 편입. 마일스톤 M14(F9)·M15(F10)·수용기준 A113부터. 사용자 확정 3결정(재론 금지): ① Docs 소스=다중 경로 등록+메뉴 on/off(각 소스 라벨+경로·기본 `docs`·F5 방어 그대로 통과) ② 빌드=폼 기반 AI 초안→사람 승인→F7 저장(자동 적용 금지·F8 Part B 준용) ③ 쓰기=`.claude/agents·skills`(F7 스코프)+신규 생성만·CLAUDE.md/AGENTS.md 읽기전용(포인터 등록=스니펫 복사 안내). 상세=§F9·§F10.
 > 상태: **설계 초안 · 미검증(codex+agy 외부감사 직전 강화 라운드).** 정본 = `docs/harness-ui/v0.5/design/design-v0.5-final.md`(코어 §1-9·A1-A46 CERTIFIED).
 > 방향(확정): v0.6 = **관측·통제 패널 심화**. 대화형 채팅(구 F1)은 **폐기 → v0.7 이월**(§F1-폐기결정). 대화는 터미널(Claude Code/Codex)이 우월하고, Web 채팅은 보안비용(stdin·resume 미검증)이 크고 차별화가 약하다. v0.6의 차별화 = **CLI가 못 하는 것**(교차-run 조회, 문서/artifact 브라우징, 사용/효과 관측).
 > 규칙: 신기능이 v0.5 모델을 **깨는 지점을 격리**. 수용기준은 **A47부터** 이어서 부여(측정가능). 구 초안(F1/F2/F3에 걸쳐있던 A47-A62)은 **본 재번호로 대체**(F1 폐기로 결번 없이 전면 재부여). PRD = `../prd/v0.6-prd.md`, 페이지 경계 = `../prd/page-requirements.md`.
@@ -15,7 +16,7 @@
 - **I5 보안 게이트:** bootstrap(fragment·single-use)·Host allowlist·Origin(mutating)·session token·쿼리토큰 금지(A23·§0-VOID). 응답 nosniff·no-referrer(security.ts onSend).
 - **I6 경로 안전(통일 원칙 — R2-#6 정합):** realpath 앵커(walk 이전 선계산)·`O_NOFOLLOW`·`isWithinRoot`·`<state_home>`/`_workspace` 분리(§9-STATE)·`deniedPath` denylist. **심링크 무조건 거부는 "신뢰 앵커(realpath) 하위의 사용자 세그먼트"에만 적용**한다. 앵커 자체·그 절대 상위부(예: macOS `/var`→`/private/var`·`/tmp`·홈)는 **realpath containment로 보장**하고 lstat 무조건거부 대상 아님(정상 환경 오거부 방지). → F5 뷰어는 앵커=`docs/`·`artifacts/`(전 사용자 세그먼트가 하위 → 무조건거부, DV4). F3 projectRoot는 앵커=`projectsHome`(절대 상위=containment·**projectsHome 하위 상대 세그먼트만** 심링크 거부, D3). **두 맥락 혼선 없음.**
 - **I7 projectRoot 캡처:** 모듈 상수, `registerApi(app, projectRoot)` 주입(index.ts). 127.0.0.1 바인딩.
-- **I8 파일 무변경(읽기전용 원칙) — F7 스코프 예외:** F4·F5·F6은 완전 읽기전용, F3은 `<state_home>` config 쓰기(프로젝트 파일 미변경). **단 F7(정의 편집기)만 예외** — `.claude/agents/*.md`·`.claude/skills/**/SKILL.md`에 한해, **스코프 게이트(DW1)+무결성 검증(DW5)+원자쓰기(DW4)+낙관적 동시성(DW6)** 하에서만 쓰기 허용. 전면 파일수정 API(`mutationEnabled`)는 **여전히 비활성**(F7은 그 하위집합 아님·독립 스코프 노브 `definitionEditEnabled`).
+- **I8 파일 무변경(읽기전용 원칙) — F7 스코프 예외:** F4·F5·F6은 완전 읽기전용, F3은 `<state_home>` config 쓰기(프로젝트 파일 미변경). **단 F7(정의 편집기)만 예외** — `.claude/agents/*.md`·`.claude/skills/**/SKILL.md`에 한해, **스코프 게이트(DW1)+무결성 검증(DW5)+원자쓰기(DW4)+낙관적 동시성(DW6)** 하에서만 쓰기 허용. 전면 파일수정 API(`mutationEnabled`)는 **여전히 비활성**(F7은 그 하위집합 아님·독립 스코프 노브 `definitionEditEnabled`). **F9는 F3와 동일 축**(`<state_home>` config `docsSources`/`docsMenuEnabled` 쓰기만·프로젝트 파일 무변경·F5 뷰어는 읽기전용 유지). **F10 쓰기는 F7 스코프(`.claude/agents·skills`)+신규 생성만으로 유지** — CLAUDE.md·AGENTS.md는 **읽기전용**(자동 쓰기 금지·포인터 등록은 스니펫 복사 안내)·docs/** write 불가. **F10 빌드 초안 생성 exec surface는 읽기전용 컨텍스트만 입력·bounded·no-auto-apply**(디스크 미기록·사람 승인 후에만 F7 경로로 저장) — I8 예외를 넓히지 않는다.
 
 ---
 
@@ -262,10 +263,10 @@ projectRoot는 `registerApi(app, projectRoot)` 주입 모듈 상수(I7). 활성 
 - Settings 조회 테이블에 편집 폼: 현 유효값 표시 + 경로 입력 + "검증". **순서(UX-R4-#2): "검증"→`dryRun:true` 프리뷰(디스크 미변경·검증결과+activeRunsWarning)→확인 다이얼로그(A99 취소/승인)→"저장"=`dryRun:false` 실제 쓰기.** 취소 시 config 무변경. 실패 = 인라인 에러(error 코드→한국어). 저장 성공 = "저장됨·재시작 후 반영". mutationEnabled는 조회 전용 배지 유지.
 - **재시작 구간 UX(A94·UX-R1-#2):** 수동 재시작 중 서버 통신 두절 → **앱 전역 "서버 연결 끊김 / 재연결 대기(Reconnecting…)" 오버레이**(`/healthz` 백오프 폴링)가 통신에러를 흡수(개별 "Failed to fetch" 폭주·화면 깨짐 방지)·서버 정상화 시 자동 부드러운 복귀. **projectRoot 재시작뿐 아니라 모든 연결끊김에 전역 적용.**
 
-### F3.7 공유 config 스키마·원자 RMW (F3+F7+F8 세 writer 공유 — R3-#3·통합감사-#1)
+### F3.7 공유 config 스키마·원자 RMW (F3+F7+F8+**F9** 네 writer 공유 — R3-#3·통합감사-#1·R7)
 F3(`projectRoot`)·F7(`definitionEditEnabled`)·**F8(`evals`)** + 불변 `projectsHome`가 **단일 `<state_home>/config.json`을 공유**한다. 구 `loadConfig`가 3필드만 하드코딩 추출·반환해 **다른 writer가 `evals`·`projectsHome`를 clobber/소거**하던 결함(통합감사-#1) 정정 — **canonical 버전드 전 필드 스키마 + root `.passthrough()` + per-leaf 보존**:
 ```ts
-// 통합감사-#1: 전 필드(projectsHome·projectRoot·definitionEditEnabled·evals)를 canonical 스키마로·root passthrough로 미지/미래 필드 보존.
+// 통합감사-#1·R7: 전 필드(projectsHome·projectRoot·definitionEditEnabled·evals·docsSources·docsMenuEnabled)를 canonical 스키마로·root passthrough로 미지/미래 필드 보존. F9 필드도 per-leaf 독립 복구(손상 시 형제 필드 무영향).
 // 전체객체 strict 금지(R4-#4)·per-leaf 독립 복구·타입 일관(schemaVersion 문자열 "1").
 function loadConfig(raw: unknown): Config_v06 {
   const env = (typeof raw === "object" && raw) ? raw as Record<string, unknown> : {};
@@ -299,8 +300,8 @@ function loadEvals(raw: unknown): EvalsConfig {
   };
 }
 ```
-- **원자 read-modify-validate-write(F3·F7·F8 공통·전 필드 보존):** 모든 config 쓰기(**세 writer**)는 **read → `loadConfig`(전 필드 복구) → 해당 필드만 수정 → 전 필드 재직렬화 → `writeJsonAtomic`**. 한 writer가 타 필드(`evals`·`projectsHome` 등)를 clobber/소거하지 않음(통합감사-#1)·미지필드 보존.
-- **동시쓰기 직렬화:** 세 writer 공통 **in-process 뮤텍스**(ingest `locks` 패턴)로 직렬화 → lost-update 차단(R3-#3c).
+- **원자 read-modify-validate-write(F3·F7·F8·**F9** 공통·전 필드 보존):** 모든 config 쓰기(**네 writer**·F9 `docsSources`/`docsMenuEnabled` 포함)는 **read → `loadConfig`(전 필드 복구) → 해당 필드만 수정 → 전 필드 재직렬화 → `writeJsonAtomic`**. 한 writer가 타 필드(`evals`·`projectsHome`·`docsSources` 등)를 clobber/소거하지 않음(통합감사-#1)·미지필드 보존.
+- **동시쓰기 직렬화:** 네 writer 공통 **in-process 뮤텍스**(ingest `locks` 패턴)로 직렬화 → lost-update 차단(R3-#3c).
 - **부팅 필드별 검증·복구:** `loadConfig` 후 `projectRoot`만 추가 D1-D7 재검증(실패 시 그 값만 null·폴백)·`definitionEditEnabled` boolean·`evals` per-leaf(F8.4). **한 필드 손상이 타 필드 소거 안 함**(R4-#4)·**미지원 `schemaVersion` 거부**·**타입 일관(문자열 "1")**. 전체객체 strict Zod 금지.
 - **택일 근거:** 두 파일 분리 대신 **단일 버전드 봉투 + 필드별 복구 + 원자 RMW + 뮤텍스**(상태 단일 출처·I6 분리·마이그레이션 훅).
 
@@ -312,7 +313,7 @@ function loadEvals(raw: unknown): EvalsConfig {
 사용자 요청: "스킬과 에이전트를 직접 수정." 이는 v0.5/v0.6 **읽기전용 불변식 I8을 깨는 첫 쓰기 기능** = 로컬 dev-tool 최대 공격면. **I8 정정:** "파일 무변경"은 **F7 스코프 예외**로 완화 — 읽기전용 원칙은 나머지 전부 유지하되, **정의 편집만** (화이트리스트 위치 + 무결성 검증 + 원자쓰기 + 낙관적 동시성 + 스코프 게이트) 하에서 허용. F5(docs)·F4·F6는 여전히 읽기전용.
 
 - **편집 대상(한정·넘지 않음):** `.claude/agents/*.md` + `.claude/skills/**/SKILL.md` **만**. docs/**·임의 시스템 파일 편집 **불가**(docs는 F5 읽기전용 유지).
-- **Codex 듀얼(`.codex/agents/*.toml`·`.agents/skills/**`):** v0.6 **비대상 → v0.7**(대칭성 < 범위 규율). 근거: 한쪽만 편집 시 drift 발생 → v0.5 drift 탐지가 이미 표면화. **저장 시 "Codex 피어가 stale일 수 있음 → Drift" 경고**(A79). TOML 편집·`.agents/skills` 대칭은 별도 작업.
+- **Codex/agy 듀얼(`.codex/agents/*.toml`·`.agents/skills/**`):** **읽기(뷰)는 F10에서 v0.6 지원**(멀티런타임 자동 수집·§F10 A129), **편집은 여전히 v0.7**(대칭성 < 범위 규율·한쪽만 편집 시 drift·TOML 정규화/런타임별 differential 게이트 미비 → `409 <runtime>-edit-v0.7`). **저장 시 "Codex 피어가 stale일 수 있음 → Drift" 경고**(A79). TOML 편집·`.agents/skills` 대칭 쓰기는 별도 작업.
 - **동작(MVP):** 조회→편집(textarea/폼)→diff→검증→저장. **기존 정의 수정만.** 신규 생성·삭제 = v0.7 비목표(F7.7).
 
 ### F7.2 API
@@ -483,6 +484,116 @@ const EvalsConfig = z.object({
 
 ---
 
+## F9 — Docs(산출물) 소스 설정 (읽기전용 확장 · config 축은 F3와 동일)
+
+### F9.1 문제·접근
+F5 뷰어는 열람 루트를 **`docs/`(재귀)** 로 하드코딩(`adapters/docs.ts`의 `join(projectRoot,"docs")`). 그러나 임의 프로젝트에서 `docs/`가 산출물이 아닌 다른 용도일 수 있고, 반대로 산출물이 다른 디렉토리에 있을 수 있다. → **표시할 산출물 소스를 설정으로 지정**(사용자 확정 ①). 접근: **F3.7 config RMW 인프라 재사용**(`<state_home>/config.json`·`withConfigLock`·per-leaf 복구) + **F5 경로안전 프리미티브 재사용**(`openSafeFile`·realpath 앵커·per-seg `isSafeSegment`) — 앵커만 소스 base로 파라미터화. **읽기전용 유지**(config만 쓰기·I8 무영향·F3와 동일 축).
+
+### F9.2 config 델타 (additive·하위호환)
+`Config_v06`에 additive 2필드:
+```
+docsSources: { label: string; path: string }[];   // 표시 소스 목록. path=projectRoot 하위 상대경로. 기본 [{label:"docs", path:"docs"}]
+docsMenuEnabled: boolean;                          // Docs 메뉴 on/off. 기본 true
+```
+- **per-leaf 독립 복구(A113):** `loadConfig`가 `docsSources` 파손 시 해당 필드만 기본값 드롭·형제 필드(`projectRoot`·`definitionEditEnabled`·`evals`) 보존. 개별 소스 엔트리도 per-entry safeParse(무효 엔트리만 제외·나머지 유지). RMW는 미지정 필드 보존(F3.7 규율).
+- 무설정(구 config)→기본 `docs` 단일 소스로 동작(무인자 하위호환).
+
+### F9.3 API 델타
+```
+GET /api/docs/sources           # 등록·검증된 소스 목록 [{id,label}] (경로는 노출 최소화)
+GET /api/docs?source=<id>       # 해당 소스 트리 (무인자=기본 소스 → 하위호환·A116)
+GET /api/docs/*?source=<id>     # 해당 소스 하위 파일 열람 (앵커=소스 base·F5 DV 재적용)
+```
+- `docsTree`/열람 리더에 **base 파라미터** 추가(하드코딩 `docs` 제거). `source` 미지정 = 기본 소스. 무효 `source` = 400.
+- **즉시 반영(재시작 불요·R1 agy LOW):** F3(projectRoot)와 달리 `/api/docs*`는 **요청마다 `loadConfigFromDisk()` 최신본을 읽어 소스를 서빙** → Settings에서 소스 변경 시 재시작 없이 즉시 반영(config는 읽기전용 소비·캐시 미보유 or 변경 감지). *(projectRoot는 모듈 상수 캡처라 재시작 필요 — 성격 차이 명시.)*
+
+### F9.4 위협모델 (표준 — 단 경로검증은 중대-인접 · 각 소스 = 새 열람 루트)
+각 소스 등록·열람은 F5 DV1~DV9를 소스 base로 재적용하고, 소스 경로 자체에 신규 방어(DS)를 건다.
+
+| ID | 방어 | 근거 |
+|----|------|------|
+| DS1 소스 경로 = projectRoot 하위 상대만·**루트 자체 금지** | 절대경로·`~`·`..` 세그먼트·UNC·드라이브문자 거부. projectRoot 밖 원천 불가. **`.`·`""`(빈 문자열)·`./`만 = projectRoot 전체 노출 → 거부**(≥1 하위 디렉토리 세그먼트 강제 — "임의 파일 브라우저 금지" F5 영구 비목표 우회 차단·R7 agy MED) | 신규(F3 D-계열 준용) |
+| DS2 per-seg `isSafeSegment` | 소스 경로 각 세그먼트 안전문자만(F5·F3 재사용) | 재사용 |
+| DS3 realpath containment | 등록 시점 소스 base realpath ∈ projectRoot 확인·전 세그먼트 심링크/reparse 거부 | 재사용(paths.ts) |
+| DS4 `deniedDocsPath` 재적용 | denylist 디렉토리(`.git`·`.ssh`·`node_modules`·`.env`) 소스 등록 거부 | 재사용(security.ts DENY) |
+| DS5 개수·길이 상한 | `MAX_DOCS_SOURCES`(예 16)·라벨/경로 길이 상한·중복 병합·Zod strict(초과 400) | 신규 |
+| DS6 dryRun 검증 API | 저장 전 소스 경로 검증(존재·containment·denylist)·인라인 에러(A119) | 신규 |
+| DS7 **열람 시점 재검증(TOCTOU) — 트리·파일 양쪽** | config 저장 후 소스 base가 심링크로 스왑될 수 있으므로 **매 요청 시 realpath 재확인**(등록 시점 신뢰 금지·F4 통합감사 R4 준용). **⚠ 파일 열람(`openSafeFile`)뿐 아니라 트리 리스팅(`docsTree` walk)도 별개 경로 — `docsTree` 진입부에서 `realBase` 계산 후 `isWithinRoot(realpath(projectRoot), realBase)`+전 세그먼트 심링크 거부를 반드시 수행**(base 자체 containment 미검사 시 스왑된 base가 projectRoot 밖 전체를 리스팅·R2 agy HIGH) | 신규(중대-인접) |
+| DS8 열람=F5 DV2~DV9 전건 | 앵커만 소스 base로 교체하고 심링크/바이너리/크기상한/XSS/CSP 전건 유지 | 재사용 |
+
+### F9.5 UI 배선
+- **Settings**: Docs 소스 편집기(추가/삭제/재정렬·라벨+경로 입력·dryRun 검증·인라인 에러·A119) + `docsMenuEnabled` 토글(A118).
+- **Docs 화면**: 소스 드롭다운(다중)·소스별 트리·빈/로딩/에러 3-state(A81)·소스 0개 또는 전부 무효 시 CTA("Settings에서 소스 추가"·A120). `docsMenuEnabled=false`면 nav에서 숨김/비활성+이유 툴팁.
+
+---
+
+## F10 — 하네스 컨텍스트 관리 페이지 + 에이전트/스킬 빌더 (중대 · 신규 읽기 화이트리스트 + 빌드 exec surface)
+
+### F10.1 문제·접근
+Docs(산출물)와 별개로, **하네스를 구성하는 컨텍스트**를 한 페이지에서 **읽고·편집하고·새로 빌드**한다(사용자 확정 ②③ + 멀티런타임 읽기 확장). 고정 기능으로 특정 프로젝트에 바로 사용.
+
+**멀티런타임 읽기(뷰) 범위 — 3 런타임 파일 규약(조사 확정·2026-07-10):** 세 런타임의 스킬은 **동일 `SKILL.md` 포맷**(YAML frontmatter `name`/`description`+md)이라 단일 리더로 커버되고, 규칙/컨텍스트는 frontmatter 없는 md다.
+| 런타임 | 에이전트 | 스킬 | 규칙/컨텍스트 | F10 지원 |
+|--------|---------|------|--------------|----------|
+| **Claude Code** | `.claude/agents/*.md` | `.claude/skills/**/SKILL.md` | `CLAUDE.md` | **읽기+편집**(F7) |
+| **Codex** | `.codex/agents/*.toml` | `.agents/skills/**/SKILL.md` | `AGENTS.md` | **읽기(뷰)만**(편집 v0.7) |
+| **Antigravity(agy)** | (SDK subagent·파일규약 없음) | `.agents/skills/**/SKILL.md`(Codex와 공유 경로) | `GEMINI.md`/`AGENTS.md` | **읽기(뷰)만** |
+
+- **접근:** 읽기=**멀티런타임 정밀 화이트리스트**(`.claude`·`.codex`·`.agents` 세 dot-dir + CLAUDE/AGENTS/GEMINI.md만 정밀 허용·나머지 dotfile 거부·신규 `deniedContextPath`) + **편집=F7 재사용·Claude만**(Codex/agy 정의는 읽기전용 뷰·편집 시 `409 <runtime>-edit-v0.7`) + **빌드=폼→AI 초안→사람 승인→F7 저장·Claude 스코프**(no-auto-apply·F8 Part B) + **신규 생성=신규 구축**(F7은 기존 leaf 전제라 신규 미지원).
+- **런타임 라벨:** 각 아티팩트에 소속 런타임 배지(claude/codex/agy) 표시. `.agents/skills`는 Codex·agy 공유(라벨=`codex/agy`).
+- **경계:** 읽기는 **projectRoot 하위만**(사용자 홈 `~/.gemini`·`~/.claude` 등 전역 설정은 원천 불가·경로탈출 방어). 편집·쓰기 스코프는 **여전히 `.claude/agents·skills`+신규 생성만**(멀티런타임 확장이 쓰기 경계를 넓히지 않음·I8 유지).
+
+### F10.2 페이지 구성 (11번째 화면 "Context")
+- **읽기(트리+뷰어·멀티런타임):** `CLAUDE.md`·`AGENTS.md`·`GEMINI.md`(projectRoot 직속) + `.claude/agents/**`·`.claude/skills/**`(Claude) + `.codex/agents/**`(Codex TOML) + `.agents/skills/**`(Codex/agy SKILL.md) 트리 열람. 런타임 배지 표시. 렌더는 F5 DV8(sanitizer·CSP·scheme 화이트리스트) 재사용 — TOML·md 모두 텍스트로 안전 렌더(실행 안 함).
+- **편집(Claude만):** `.claude/agents`·`.claude/skills` 정의는 F7 GET/PUT/rollback 재사용. **CLAUDE.md·AGENTS.md·GEMINI.md는 읽기전용**(쓰기 라우트 없음)·하네스 포인터 등록은 **스니펫 복사 안내**. **Codex(`.codex`·`.agents/skills`)·agy 정의는 읽기전용 뷰**(편집 시 `409 <runtime>-edit-v0.7` — duo drift·TOML 정규화·런타임별 differential 게이트 미비로 v0.7 이월).
+- **빌드:** 폼(도메인·역할 한 문장)→초안 생성(디스크 미기록)→diff 미리보기→사람 승인→F7 저장(신규 생성).
+
+### F10.3 읽기 화이트리스트 위협모델 (중대 — dot-prefix 함정·멀티런타임)
+`security.ts`의 `DENY=/(^|\/)\.[^/]/`는 **모든 dotfile/dot-dir을 거부**(F5는 `docs/` 열람이라 무관). F10 읽기는 `.claude`·`.codex`·`.agents`를 열어야 하므로 **이 세 dot-dir만 정밀 허용하는 신규 리더**가 필요 — DENY를 느슨하게 풀면 `.env`·`.git`·`.ssh`·`.gemini`(사용자 홈) 노출, 그대로 두면 세 dir이 막힌다. **⚠ 기존 전역 `DENY`·`deniedDocsPath`를 수정하지 않는다(F5 뷰어 방어 훼손 금지·R1 agy MED)** — F10 전용 **독립 `deniedContextPath`** 신설(병렬 구조). 열람 루트는 **`.claude/agents·skills`·`.codex/agents`·`.agents/skills`+CLAUDE/AGENTS/GEMINI.md만**(각 dot-dir 전체 재귀 아님·정밀 서브루트만 — 스크래치/설정 노출 차단).
+
+| ID | 방어 |
+|----|------|
+| HR1 열람 루트 = 멀티런타임 화이트리스트 | (projectRoot 직속 파일) `CLAUDE.md`·`AGENTS.md`·`GEMINI.md` + `.claude/agents/**`·`.claude/skills/**`(Claude) + `.codex/agents/**`(Codex) + `.agents/skills/**`(Codex/agy)**만**. 그 외 400 |
+| HR2 **dot-dir 3종 정밀 허용** | 첫 세그먼트가 정확히 `.claude`·`.codex`·`.agents`일 때만 dot-prefix 통과(+둘째 세그먼트 ∈ 위 서브루트). `.env`·`.git`·`.ssh`·`.gemini`·`.codex/config`·기타 dotfile/서브 전부 거부(정밀 화이트리스트·denylist 아님) |
+| HR3 전 세그먼트 심링크/reparse 거부 | 세 서브루트 하위 심링크가 외부(`~/.ssh`·`~/.gemini`)로 리다이렉트하는 벡터 차단(realpath containment·O_NOFOLLOW). **projectRoot 직속 3파일(CLAUDE/AGENTS/GEMINI.md)도 leaf lstat+O_NOFOLLOW+realpath containment**(직속 파일 심링크→외부 차단·R5 codex LOW) |
+| HR4 secret denylist 유지 | 화이트리스트 하위라도 `*.key`·`*.pem`·`id_rsa*`·`.env`류·토큰·크기 이상 거부 |
+| HR5 렌더 안전 = F5 DV8 | markdown·TOML **텍스트 렌더**(sanitizer·CSP·scheme 화이트리스트·외부 리소스 차단·바이너리 거부·크기상한·**실행 안 함**) |
+| HR7 **트리 바운드·대량 dir 차단(R7 agy HIGH)** | 트리 열거 `MAX_CONTEXT_NODES` 상한(F4 `MAX_RUNS_SCAN`·F5 `MAX_DOCS`와 동등)·초과 시 `truncated:true`. `deniedContextPath`에 **`node_modules`·`venv`·`.venv`·`__pycache__`·`dist`** 포함 — 스킬 dir(`.claude/skills/{name}`) 내 패키지/빌드 환경 무제한 순회로 인한 OOM/DoS 차단(F5 DV5 `node_modules` 차단 규율 상속) |
+| HR6 **편집=Claude 스코프만** | 읽기는 멀티런타임이나 **PUT/rollback·신규생성은 `.claude/agents·skills`만**. `.codex`·`.agents/skills`·GEMINI.md 편집 요청 = `409 <runtime>-edit-v0.7`(읽기전용 뷰). projectRoot 밖(`~/.gemini` 등) 읽기도 원천 거부 |
+
+### F10.4 빌드 초안 생성 surface 위협모델 (중대 — 신규 exec/생성 공격면)
+빌드 초안은 **읽기전용 컨텍스트만 입력**받아 정의 초안 텍스트를 반환하고, **디스크에 쓰지 않는다**. 저장은 사람 승인 후에만 F7 경로로. (초안 생성 메커니즘 = 서버가 로컬 CLI를 bounded 호출 or 결정적 템플릿 — **M15 P3에서 선검증·가정 위에 구현 금지**.)
+
+| ID | 방어 |
+|----|------|
+| HB1 bounded 입력 | 도메인/역할 문자열 길이·문자 상한. **초안 = 데이터**(지시로 흡수 금지·프롬프트 주입 방지) |
+| HB2 exec 규율(I3) | 초안이 CLI 호출이면 `execFile`+argv·**shell 보간 0**·`noFlag`·타임아웃·출력 상한·stdio 로그파일(I2) |
+| HB3 읽기전용 입력만 | 초안 생성은 프로젝트 파일 **쓰기 0**·읽기 컨텍스트만 참조(빌드가 실행 트리거 아님) |
+| HB4 no-auto-apply | 초안은 **자동 저장 절대 금지** — diff 표시 → 사람 승인 → 그때만 F7 저장(F8 Part B) |
+| HB5 신규 생성 경로안전(신규 구축) | leaf 미존재 확인·부모 심링크 거부·skill dir `mkdir` escape 거부·이름 충돌 409·`.claude/agents·skills` 스코프 밖 생성 400 |
+| HB6 저장 = F7 전건 통과 | 승인 후 저장도 canonicalize(DW5)+무결성+원자쓰기(DW4)+낙관적 동시성(DW6)·초안 무결성 위반 400 |
+| HB7 게이트 | `definitionEditEnabled` off면 빌드/저장 비활성(fail-closed)·읽기만 허용 |
+| **HB8 동시성·rate-limit(R1 agy HIGH)** | **in-flight 빌드 초안 동시 1개 제한**(서버 뮤텍스·초과 429)·요청 쿨다운(rate-limit)·초안=exec/LLM spawn이므로 무제한 호출 시 비용폭주·리소스고갈(DoS) 차단. `create`(저장)도 동일 백프레셔 | 신규(비용·DoS) |
+
+### F10.5 API 델타
+```
+GET /api/context/tree                 # 멀티런타임 화이트리스트 트리(HR1)·각 노드 runtime 라벨(claude|codex|agy)·runtime 필터
+GET /api/context/file?path=…          # 읽기(HR1~HR7)·md/TOML 텍스트 뷰
+# 편집(Claude 스코프만·HR6): 기존 F7 라우트 재사용 (GET/PUT/rollback · .claude/agents·skills)
+#   .codex·.agents/skills·GEMINI.md 편집 요청 → 409 <runtime>-edit-v0.7 (읽기전용 뷰)
+POST /api/context/build/draft         # 폼→초안 반환(디스크 미기록·HB1~HB4·HB7·HB8)
+POST /api/context/build/create        # 승인된 초안→신규 생성(HB5·HB6·F7 저장·.claude만)
+# CLAUDE.md·AGENTS.md·GEMINI.md 쓰기 라우트 없음(읽기전용·A123·A130)
+```
+
+### F10.6 UI 배선 · 비목표
+- **Context 페이지(11번째 화면):** 읽기 트리·F7 편집기·빌더 폼·diff 승인·"미적용 초안" 유지·CLAUDE.md 포인터 스니펫 복사·3-state·접근성(A128).
+- **초안 상태 책임(R1 agy MED):** 서버는 **무상태**(초안 디스크 미기록·HB3) → "미적용 초안" 유실 방지는 **전적으로 클라이언트 세션**(sessionStorage/상태관리)이 소유. 서버 재기동·새로고침 간 초안 보존은 클라이언트 책임(A107 "미적용 유지"와 아키텍처 충돌 없음 명시).
+- **비목표(v0.7+):** 풀 팩토리 오케스트레이션(에이전트 팀 spawn·자동 다파일 생성)·CLAUDE.md/AGENTS.md 자동 쓰기·초안 자동 적용·**Codex/agy 편집(읽기전용 뷰만)**. v0.6은 **단건 정의 초안+사람 승인**까지.
+- **읽기 범위 경계(R5 agy·명시적 비목표로 은폐 갭 해소):** v0.6 F10 읽기 = **에이전트·스킬(`.claude/agents·skills`·`.codex/agents`·`.agents/skills`) + 컨텍스트(CLAUDE/AGENTS/GEMINI.md)만.** **agy 규칙=GEMINI.md/AGENTS.md(디렉토리 기반)이며 이미 포함**(별도 rules 경로 아님). **plugins·hooks·sidecars·`.claude-plugin/`(플러그인 패키징)·MCP 설정·rules 서브디렉토리 = v0.7 비목표**(스코프 규율·이들은 시크릿/설정 인접이라 별도 위협모델 필요). 트리에서 미표시가 아니라 **명시적 비목표**(사용자 혼란 방지).
+
+---
+
 ## 수용기준 (A47~ — v0.5 A46 이어서 · 측정가능)
 | # | 기준 | M | 기능 |
 |---|------|---|------|
@@ -568,6 +679,30 @@ const EvalsConfig = z.object({
 
 **F8 수용기준: A102-A112(11개)** — Eval 화면. self-eval 교리(alignment≠품질·자동 금지·하드 게이트·단계 3/4 실험) 비협상. 전체 A47-A112 = 기능 A47-A80(34) + UX A81-A101(21) + F8 A102-A112(11).
 
+### F9·F10 수용기준 (A113~ — 후속 편입 · 측정가능)
+| # | 기준 | M | 기능 |
+|---|------|---|------|
+| A113 | config additive `docsSources:{label,path}[]`·`docsMenuEnabled:boolean`·loadConfig per-leaf 복구(손상 소스만 드롭·형제 config 필드 보존·per-entry safeParse·RMW 전 필드 보존) | M14 | F9 |
+| A114 | 소스 경로검증(DS1~DS6): projectRoot 하위 상대만·절대/`~`/`..`/UNC 거부·per-seg isSafeSegment·realpath containment·전 세그먼트 심링크/reparse 거부·deniedDocsPath 재적용·fail-closed 400 | M14 | F9 |
+| A115 | 소스 개수(`MAX_DOCS_SOURCES`)·경로/라벨 길이 상한·중복 병합·Zod strict(초과 400) | M14 | F9 |
+| A116 | `GET /api/docs/sources`·`?source=<id>` 트리·기본 소스=`docs` 하위호환(무인자 200)·무효 source 400 | M14 | F9 |
+| A117 | 소스 하위 열람=F5 DV2~DV9 전건 재적용(openSafeFile 앵커=소스 base·경로탈출/심링크/바이너리/크기상한/XSS/CSP)·**열람 시점 realpath 재검증(DS7·TOCTOU)** | M14 | F9 |
+| A118 | docsMenuEnabled 토글: on→메뉴 노출·off→숨김/비활성+이유 툴팁(A81) | M14 | F9 |
+| A119 | (UI) Settings 소스 편집기 추가/삭제/재정렬·dryRun 검증(DS6)·인라인 에러 | M14 | F9 |
+| A120 | (UI) Docs 다중 소스 드롭다운·소스별 트리·빈/로딩/에러 3-state·소스 0/무효 CTA | M14 | F9 |
+| A121 | 읽기 화이트리스트(HR1~HR4·**멀티런타임**): CLAUDE.md·AGENTS.md·GEMINI.md(projectRoot 직속)·**`.claude/agents/**`·`.claude/skills/**`(Claude)·`.codex/agents/**`(Codex)·`.agents/skills/**`(Codex/agy)만**(각 dot-dir 전체 재귀 아님·정밀 서브루트만·`.claude/settings.json`·`.codex/config`·`.claude/tmp` 등 스크래치 차단)·**`.claude`·`.codex`·`.agents` 세 dot-dir만 정밀 허용**·그 외 dotfile(.env/.git/.ssh/.gemini) 거부·**전 세그먼트 심링크/reparse(Windows junction/mount) 거부**·secret denylist·**projectRoot 밖(`~/.gemini` 등) 원천 거부** | M15 | F10 |
+| A122 | 파일 열람 HR5=F5 DV8(sanitizer·CSP·scheme 화이트리스트·외부리소스 차단·크기상한·바이너리 거부)·**md·TOML 텍스트 렌더(실행 안 함)** | M15 | F10 |
+| A123 | 편집=F7 GET/PUT/rollback 재사용(DW1~DW11·definitionEditEnabled 게이트)·**CLAUDE.md/AGENTS.md/GEMINI.md 쓰기 라우트 없음(읽기전용)**·포인터=스니펫 복사 안내 | M15 | F10 |
+| A124 | 빌드 초안(HB1~HB4·HB7·HB8): 폼(도메인·역할)→초안 반환·**디스크 미기록**·bounded 입력·읽기전용 컨텍스트만·execFile+argv(I3)·shell 금지·**초안=데이터(주입 방지)**·게이트·**in-flight 동시 1개+쿨다운(비용폭주/DoS 차단·429)** | M15 | F10 |
+| A125 | 초안→diff→사람 승인→F7 저장(canonicalize+무결성+원자+낙관적 동시성)·**자동 적용 0(no-auto-apply)**·초안 무결성 위반 400 | M15 | F10 |
+| A126 | 신규 정의 생성(HB5·HB6·**신규 구축**): leaf 미존재 확인·부모 심링크 거부·skill dir mkdir 안전·이름 충돌 409·`.claude/agents·skills` 스코프 밖 생성 400 | M15 | F10 |
+| A127 | 쓰기스코프 경계(I8): `.claude/agents·skills`+신규 생성만·CLAUDE.md/AGENTS.md/GEMINI.md/docs/** write 차단·빌드 exec 프로젝트 파일 쓰기 0 | M15 | F10 |
+| A128 | (UI) Context 페이지(11번째): 멀티런타임 읽기 트리(**런타임 배지·필터** claude/codex/agy)·F7 편집(Claude만)·Codex/agy=읽기전용 뷰 배지·빌더 폼·diff 승인·"미적용 초안" 유지(A107 준용·유실 방지)·스니펫 복사·3-state·접근성 | M15 | F10 |
+| A129 | **멀티런타임 자동 수집·뷰(읽기)**: 3 런타임 스킬=동일 SKILL.md 리더·Codex 에이전트=TOML 텍스트 뷰·트리에 **런타임 배지**(claude/codex/agy·`.agents/skills`=codex/agy 공유)·런타임 필터·**트리 바운드 `MAX_CONTEXT_NODES`(F4/F5 동등)+`deniedContextPath`에 `node_modules`·`venv`·`.venv`·`__pycache__`·`dist` 포함**(스킬 dir 내 패키지 환경 무제한 순회 차단·R7 agy HIGH) | M15 | F10 |
+| A130 | **편집=Claude 스코프만(HR6)**: PUT/rollback·신규생성은 `.claude/agents·skills`만·Codex(`.codex`·`.agents/skills`)·agy·GEMINI.md 편집 요청 → **`409 <runtime>-edit-v0.7`**(읽기전용 뷰·duo drift/TOML 정규화 미비로 v0.7)·읽기 확장이 쓰기 스코프 안 넓힘(I8 회귀) | M15 | F10 |
+
+**F9·F10 수용기준: A113-A130(18개)** — F9 소스설정(A113-A120·8) + F10 컨텍스트/빌더(A121-A130·10·멀티런타임 A129·A130 포함). 전체 A47-A130 = 기능 A47-A80(34) + UX A81-A101(21) + F8 A102-A112(11) + **F9 A113-A120(8) + F10 A121-A130(10)** = 84개.
+
 ## 위협 스위트 (거부케이스 — 감사 검증용)
 | 스위트 | 케이스(전건 거부/차단) | 기준 |
 |--------|------------------------|------|
@@ -577,7 +712,10 @@ const EvalsConfig = z.object({
 | F3-root | 상대경로·`..`·`~/proj`·`\\host\share`·`C:foo`·미정규화 유니코드·**projectsHome 하위 상대 세그먼트 심링크(탈출)**·**Windows junction/reparse/mount 하위 세그먼트**·**쓰기가능 민감디렉토리 위조 마커**·projectsHome 밖·검증후 스왑·**부팅 unsafe-env(폴백)**·미프로비저닝(409). **ACCEPT(오거부 금지): `/var`·`/tmp` 등 절대 상위 심링크를 통과하는 정상 projectsHome 하위 경로** | A68·A69·A70 |
 | F7-편집(mutating) | **REJECT**: 쓰기 경로탈출(`.claude` 밖·`../`)·심링크 대상 write·화이트리스트 밖 확장자/위치·초과크기·**필수(name/description) 누락**·YAML 파싱실패·**name 리네임**·stale baseHash(409)·게이트 off PUT(403)·Origin 위조·백업 traversal(논리name 보간)·백업 심링크·폴리글롯/멀티도큐먼트/앵커/중복키·중복 name(409 ambiguous)·pathId 불일치(409)·stale 롤백·손상/심링크 백업·손상 config→게이트 off·**직렬화본 런타임 리더 divergence(F7.8 게이트)**·config 필드 clobber. **ACCEPT(오차단 금지·R4-#2/#3): 본문 `---`(수평선·코드펜스)·옵션필드(role/tools/skills/triggers/references)·미지필드(passthrough 보존)** | A72·A73·A75·A76·A77·A78 |
 | F8-Eval | 경로탈출·심링크·대용량·**미서명/서명불일치·수학 모순 scorecard(격리)**·**자기일관 위조 aggregate(precomputed `verdict_counts`/`alignment_score`→서버 원장 재계산 불일치 격리·R7)**·**스크립트 자가서명·키 재생성(서버 서명만·R3-#1)**·**scorecard XSS(→DV8)**·**게이트 우회: 29·9·null·flood·절단창·rollup 체인 링크 불일치/seq gap/head 서명 불일치/절단(fail-closed·R3-#2)**·**ACCEPT(브릭 0·R4-#1·R5·R6): 키 회전 후 과거 rollup 엔트리·과거 scorecard·활성 window `_workspace` 사후 변조 어느 쪽도 신규 제안 브릭 0(무결성=해시체인/rollup digest·게이트는 rollup만·gate-time `_workspace` 재읽기 없음)**·**_workspace 가짜 추세 UI 기만(rollup 소싱·R3-#3)**·**config<floor·형제 손상→floor 밑(per-leaf+max·R2-#5)**·**Stage 4 쓰기(400)**·**envelope payload 불일치/타깃 교체(가변 rollup-head 미결속·R4-#2)·config stale(409)·nonce in-session replay(durable·R3-#4)**·**envelope 없는 제안 적용(F7 일반 편집 우회 차단·DW11·통합감사-#4)**·**config writer가 evals/projectsHome clobber(canonical 전 필드 RMW 차단·통합감사-#1)**·**evals 한 잎(threshold) 손상→형제(weight/metrics) clobber(재귀 per-leaf 거부·R2-#1)**·**심링크 run dir(공용 경화 리더·앵커 파라미터·통합감사-#3·R2-#4)**·**GET이 ingest/상태변경(side-effect 0·거부·통합감사 R3)**·**미인증 ingest/nonce 발급(mutating 게이트·GET 발급 불가·R4-#2)**·**크래시 후 승인 제안 유실(멱등 상태머신 `issued→applying→consumed`·유실 0)·재시도 중복적용(멱등 판정·중복 0·R4-#2)**·단계<3 제안·alignment 품질 오표시. **ACCEPT(정당 흐름 브릭 0): `definitionEditEnabled` 토글이 대기 제안 무효화 안 함(envelope=evals-config만·R2-#2)·일반 편집 상시 허용(우회 아님·R2-#3)**. **OUT-OF-SCOPE(게임오버·F8.8): `<state_home>` {rollup,head}/nonce 조율 rollback(cross-restart)** | A102·A105·A106·A107·A110·A111 |
-**거부케이스 총 105+**(F4:8+·F5:12·F2:6+·F3:12+·F7:23+·**F8:44+**·통합감사 R1~R4 포함·state_home 장악 out-of-scope·ACCEPT 케이스 별도).
+| F9-소스 | 소스 경로: 절대경로·`~`·`../탈출`·projectRoot 밖·심링크 base·denylist 디렉토리(`.git`/`.ssh`)·개수/길이 초과·열람 시점 심링크 스왑(DS7). 열람: 소스 하위 `../`·심링크·바이너리·초과크기·XSS(F5 DV 소스별 재적용). **ACCEPT: 기본 `docs` 무인자 하위호환·정상 상대 소스** | A114·A115·A116·A117 |
+| F10-컨텍스트/빌드 | 읽기: `.git/config`·`.env`·`~/.ssh/id_rsa`·`~/.gemini/**`(홈)·`.gemini`·`.codex/config`·화이트리스트 밖 dotfile·`../`·**심링크/reparse(junction/mount)→외부**·projectRoot 밖·**스킬 dir 내 `node_modules`/`venv`/`__pycache__` 대량 순회(트리 `MAX_CONTEXT_NODES` 초과·denylist)**. 편집: **Codex(`.codex`·`.agents/skills`)·agy·GEMINI.md PUT → 409 `<runtime>-edit-v0.7`**·CLAUDE.md/AGENTS.md write·docs/** write·`.claude` 밖 생성·신규생성 부모 심링크·이름충돌(409)·스코프 밖(400). 빌드: 초안 입력 shell 메타/과대·초안 자동적용(승인 없이 저장 0)·초안 파일쓰기/실행 트리거·프롬프트 주입·동시 2요청 429. **ACCEPT(읽기): `.claude/agents·skills`·`.codex/agents`(TOML)·`.agents/skills`(SKILL.md) 정상·CLAUDE/AGENTS/GEMINI.md 열람·본문 `---`·passthrough 필드**(단 각 dot-dir 직속 설정·`.claude/tmp`·기타 dot는 거부) | A121·A123·A124·A125·A126·A127·A129·A130 |
+
+**거부케이스 총 125+**(F4:8+·F5:12·F2:6+·F3:12+·F7:23+·**F8:44+**·**F9:10+**·**F10:12+**·통합감사 R1~R4 포함·state_home 장악 out-of-scope·ACCEPT 케이스 별도).
 
 ## 가정 (assumption — 근거 미확정 격리)
 | # | 가정 | 상태 | 미해결 시 영향 | 확인 |
@@ -601,6 +739,8 @@ const EvalsConfig = z.object({
 - **M11 — F3 projectRoot 편집**(보안 자기완결·독립 배포 가능): D1-D8·config 지속·부팅 precedence·Settings 폼. **DoD: A68-A71 + F3-root 스위트.**
 - **M12 — F7 정의 편집기**(첫 mutating·최대 공격면·**방어 확실히 된 뒤 마지막**): DW1-DW10·이름→경로 서버해소·무결성 검증·원자쓰기·낙관적 동시성·롤백·스코프 게이트·Agents/Skills 편집기. **DoD: A72-A80 + F7-편집 스위트**(쓰기 경로탈출/심링크write/무결성/stale-write/게이트off 전건 거부) + I8 예외 경계 회귀(F4-F6 여전히 읽기전용 assert).
 - **M13 — F8 Eval(평가 대시보드·제안·지표관리)**: Part A(읽기·**서버 서명 검증·수학 교차검증·추세=rollup 소싱**)·Part B(**해시체인+head HMAC rollup 게이트·서명 envelope(config 결속·head 미결속)+durable nonce+게이트 재평가·자동 금지**)·Part C(config **per-leaf+floor**). **DoD: A102-A112 + F8-Eval 스위트**(스크립트 자가서명/체인 링크·seq·head 불일치/절단/config stale(409)/_workspace 가짜 추세/floor 밑 리셋 거부·**키 회전 후 과거 엔트리 브릭 0·활성 window `_workspace` 사후 변조 게이트 영향 0(R6)**·**대기 중 rollup append돼도 게이트 만족 시 도달 가능**·자동 적용 금지) + **교리 회귀**(alignment≠품질·floor 불가·단계<3 비활성) + **암호 픽스처**(서버 키·회전·체인·durable nonce·**신뢰 도메인 경계 F8.8**·AS8/AS9). 읽기=비가역 없음·적용=F7·config=가역.
+- **M14 — F9 Docs 소스 설정**(표준·읽기전용 확장): config additive(docsSources/docsMenuEnabled·per-leaf 복구)·소스 경로검증(DS1~DS8)·소스 인지 `/api/docs*`·Settings 편집기·메뉴 토글. **DoD: A113-A120 + F9-소스 스위트**(경로탈출/심링크/개수·길이 전건 거부·기본 소스 무인자 하위호환·열람 시점 TOCTOU 재검증) + I8 회귀(F5 읽기전용·config만 쓰기).
+- **M15 — F10 하네스 컨텍스트 관리 + 빌더**(중대·마지막): **멀티런타임 읽기 화이트리스트**(HR1~HR7·`.claude`·`.codex`·`.agents` 3 dot-dir 정밀+CLAUDE/AGENTS/GEMINI.md·런타임 배지)·편집(F7 재사용·**Claude 스코프만**·Codex/agy=읽기전용 뷰 409)·빌드 초안 surface(HB1~HB8·bounded·no-auto-apply·동시성)·신규 생성(신규 구축)·Context 페이지(11번째). **DoD: A121-A130 + F10 스위트**(멀티런타임 읽기 탈출/dot-prefix 오허용·**전 세그먼트 심링크/reparse 거부**·**트리 `MAX_CONTEXT_NODES`+`node_modules`류 대량 dir 차단**·Codex/agy·GEMINI.md 편집 409·빌드 exec 주입/DoS·신규생성 경로탈출·CLAUDE/AGENTS/GEMINI.md write 차단·no-auto-apply 전건 거부) + I8 경계 회귀(**읽기 확장이 쓰기 스코프 안 넓힘**).
 
 ## 리스크·비가역성 (정본 §8 이어서)
 | 리스크 | 등급 | 완화 | 검증 |
@@ -619,11 +759,16 @@ const EvalsConfig = z.object({
 | **F8 scorecard 위조·XSS·DoS·flood(반신뢰 `_workspace` 산출물)** | **중대** | **서버 재도출-후-서명(원장서 집계 재계산·precomputed 거부·자기일관 위조 oracle 차단·R7)·키 미제공·O_EXCL·ingest만 HMAC→이후 무결성=해시체인/rollup digest(회전 무브릭·R5)·게이트는 rollup만·gate-time `_workspace` 재읽기 없음(R6)**·수학 교차검증·DV8·추세 rollup 소싱. **원장=자기판정 약증거→사람 승인 backstop(F8.8·R7)·`<state_home>` 조율 rollback=게임오버·out-of-scope(R4-#3)** | M13 A102·A105·A106 |
 | F8 alignment을 품질로 오표시(신뢰 왜곡) | 표준 | alignment≠품질 정직 라벨·quality_label 분리·null=미측정(0/품질 위장 금지) | M13 A103 |
 | F8 config 게이트 우회·clobber·floor 밑 리셋 | 표준 | Zod `.min(30/10/3)`·**per-leaf 독립 복구(형제 보존)+effective=max(값,floor)·R2-#5**·fail-closed 안전기본값 | M13 A110·A111 |
-| **통합-1 공유 config writer 간 clobber(F3/F7/F8 evals·projectsHome 소거)** | **중대** | **canonical 버전드 전 필드 스키마+root passthrough+per-leaf 보존 원자 RMW(세 writer 공통)**·미지원 schemaVersion 거부·타입 일관 | M11/M13 A71·A110 |
+| **통합-1 공유 config writer 간 clobber(F3/F7/F8/F9 evals·projectsHome·docsSources 소거)** | **중대** | **canonical 버전드 전 필드 스키마+root passthrough+per-leaf 보존 원자 RMW(네 writer 공통·F9 `docsSources`/`docsMenuEnabled` 포함)**·미지원 schemaVersion 거부·타입 일관 | M11/M13/M14 A71·A110·A113 |
 | **통합-2 F8→F7 crypto 우회(제안이 일반 편집으로 저장)** | **중대** | **F7 PUT `evalProposal` 필드+DW11 실집행**(nonce 소비·envelope 서명·config 해시·A106 재평가·payload 일치)·envelope 없는 제안 적용 불가 | M12/M13 A107 |
 | 통합-3 F4/F6/F8 리더 심링크 리다이렉트 | **중대** | **공용 경화 바운드-리더**(realpath 앵커·전 하위 세그먼트 심링크/reparse 거부·O_NOFOLLOW·containment·F5 DV 동일) | M7/M9/M13 A50·A60·A102 |
 | 통합-4 manifest.agent 스키마 모순 | 표준 | **published Manifest additive optional `agent`(nullable·하위호환·supervisor writer·마이그레이션 테스트)** | M10 A47·A66 |
 | (폐기)F1 stdin/PTY EPIPE 붕괴 | — | **F1 폐기로 리스크 제거**(v0.7 재검토 시 별도) | §F1-폐기결정 |
+| F9 소스 경로탈출(임의 디렉토리 노출) | 표준(경로검증=중대-인접) | DS1~DS8: projectRoot 하위 상대만·realpath containment·전 세그먼트 심링크 거부·denylist·개수/길이 상한·**열람 시점 재검증(TOCTOU·DS7)** | M14 A114·A117 |
+| **F10 빌드 초안 exec surface(주입·비용·shell·DoS)** | **중대** | HB1~HB8: bounded 입력·**초안=데이터(프롬프트 주입 방지)**·읽기전용 컨텍스트만·execFile+argv(I3)·shell 금지·no-auto-apply·게이트·**동시 1개+쿨다운(비용폭주/DoS·429·R1 agy)**·메커니즘 M15 P3 선검증 | M15 A124·A125 |
+| **F10 읽기 화이트리스트 dot-prefix 오허용(시크릿 노출·멀티런타임)** | **중대** | HR1~HR4: `.claude`·`.codex`·`.agents` **3 dot-dir만** 정밀 허용(정밀 서브루트)·`.env`/`.git`/`.ssh`/`.gemini`/각 dot-dir 직속 설정 거부·secret denylist·전 세그먼트 심링크 거부·**projectRoot 밖(`~/.gemini`) 원천 거부** | M15 A121·A129 |
+| F10 멀티런타임 읽기 확장이 쓰기 경계 침식 | 표준(경계 회귀) | HR6: 읽기는 3 런타임이나 **편집·신규생성은 `.claude/agents·skills`만**·Codex/agy/GEMINI.md 편집 409·읽기 확장이 mutating 스코프 안 넓힘(I8 assert) | M15 A130 |
+| **F10 신규 생성 경로탈출(`.claude` 밖 write·F7 우회)** | **중대** | HB5·HB6: 신규 생성 전용 경로안전(leaf 미존재·부모 심링크 거부·skill dir mkdir escape 거부·이름충돌 409·스코프 밖 400)·**F7 leaf 실재 전제 우회 차단(신규 구축)** | M15 A126·A127 |
 
 **비가역성 요약:** F4·F5·F6 = **읽기전용(가역·비가역 없음)** — 파일 무변경. F2 = 경량(read-only 기본·실행은 사용자 확인). F3 = 가역(config 삭제/env override 롤백)·단 잘못된 root가 활성 시 노출 → 부팅 재검증(D7·A70) 상시 방어. **F7 = 비가역(정의 파일 덮어쓰기)** — I8 유일 예외 → DW6 낙관적 동시성·DW7 `.bak` 직전본 롤백·diff 확인·스코프 게이트(기본 off)로 완화. 편집≠실행(DW9). **F8 = Part A/B(제안) 읽기전용(비가역 없음)·Part B 적용은 F7 경로(비가역·롤백)·Part C config 가역(F3.7 RMW)** — 자기채점 자동 적용 금지.
 
@@ -647,7 +792,7 @@ const EvalsConfig = z.object({
   - **관측성 과대표시 금지** — measured는 증거 실존 시에만·per-value confidence·부재 시 `unattributed` 강등(신뢰 붕괴 방지).
   - **스키마 델타 = additive optional `manifest.agent` 하나만(통합감사-#2)** — F1 델타(conversationId 등) 폐기·나머지 v0.5 §5 불변. `agent`는 nullable/default(하위호환·supervisor writer·마이그레이션 테스트). events `usage`(F6)는 v0.5 §5 선반영분 소비. ("스키마 무변경" 과claim 정정.)
   - **F7 = 첫 mutating·I8 유일 예외** — 사용자 요청("정의 직접 수정")의 가치는 크나 **로컬 dev-tool 최대 공격면** → `.claude` 화이트리스트·이름→경로 서버해소(pathId)·무결성 게이트(**strict YAML+본문경계+실 런타임 differential 릴리스 게이트**)·원자쓰기(atomic.ts)·opaque 백업·낙관적 동시성·스코프 게이트(기본 off)·편집≠실행 10층(DW1-DW10)으로 경화. **방어 확실히 된 뒤 마지막(M12)** 배포. 생성·삭제·Codex 듀얼·docs 편집은 v0.7/영구 비목표.
-- **UX 축(신규):** 보안/정합성 감사(R1-R4) 위에 **UX 수용기준 A81-A99(19개)** 레이어 — 빈/로딩/에러/재인증·게이트·위험작업·필터/뷰어/신뢰라벨·일관성·접근성 + UX 외부감사 반영. **기능계약(A47-A80) 무변경.** A81-A99는 각 마일스톤(M7-M12) DoD에 **횡단 적용**.
+- **UX 축(신규):** 보안/정합성 감사(R1-R4) 위에 **UX 수용기준 A81-A101(21개·UX-R4로 A100/A101 편입)** 레이어 — 빈/로딩/에러/재인증·게이트·위험작업·필터/뷰어/신뢰라벨·일관성·접근성 + UX 외부감사 반영. **기능계약(A47-A80) 무변경.** A81-A101은 각 마일스톤(M7-M15) DoD에 **횡단 적용**.
   - **UX-R1(agy):** A93(F7 편집분 보존)·A94(전역 재연결)·A95(F4 절단 고지).
   - **UX-R2(codex+agy):** A94 강화(재연결 **상태머신·401 갭**)·A90 강화(**dead→선택 window 관측 없음+커버리지**)·A95 강화(복구 안내)·**A96(오래된 이력 기간 파티셔닝 도달)**·**A97(첫 실행 projectsHome/런타임 준비)**·**A98(F5 대용량 413·부분파일 손상 방지)**·**A99(F3 활성 run 취소/헤드리스 승인)**. 다수가 앞선 보안수정의 UX 부작용 정정.
   - **UX-R3(codex·agy=수렴):** A96 **시각 도메인 통일** — `from`/`to`·정렬·파티션·표시를 **`recordedAt`(FS-time) 단일 도메인**으로(구 createdAt↔FS-time 불일치 → 복사/복원 run 경계 누락 정정)·라벨 "기록 시각(FS)"·manifest `createdAt` 상세 병기. **택(a) FS-time 단일 도메인 채택.**
@@ -664,7 +809,7 @@ const EvalsConfig = z.object({
 - **F8 UX 감사 R1(codex+agy 동일·4건·보안 불변·UX 레이어만 반영):** #1 **빈 상태 데드엔드**(미실행="아직 실행 안 됨"+실행/문서 CTA·`eval-unavailable`=원인+복구·A104)·#2 **무결성 상태 영향+복구 명시**(상세 파일 불일치=추세/게이트 안전·rollup 훼손=제안 차단·"변조" 툴팁·A112)·#3 **승인/적용 분리**(CTA="편집기에서 검토·저장"·"미적용" 유지·유실 방지·A107/A112)·#4 **임계 floor UI 상시 표시+인라인 거부**·**A112 "단계4 확인" 모순 정정→확인 대상=단계3 전환+지표/정규화 변경·Stage 4=비활성 사유만**(A110-A112).
 - **F8 UX 감사 R2(codex 1건·반영):** rollup 무결성 훼손 데드엔드 해소 — 진단 + 복구("원장 재구축·재검증") CTA·비악의 훼손만·조율 rollback은 게임오버 유지.
 - **F8 UX 감사 R3(agy no-high·codex 1건·반영):** **재구축 검증 소스 미정의 정정** — R2 복구가 "무엇으로 검증"이 미정이라 rollup 손상+키 회전 시 미검증 `_workspace` 재신뢰 구멍. 정정: (a) **ingest 시 독립 서명 receipt를 rollup과 별도 저장**(`<state_home>/evals-receipts`·keyId)·(b) **키링에 전 이력 키 보존(재구축 재검증 전용·정상운영은 R4대로 chain+head·구키 불요·둘 모순 없음)**·(c) **재구축=독립 receipt 검증 통과분만**·(d) **독립 소스 전무 시 재구축 불가+명시 리셋만(미검증 `_workspace` 재신뢰 절대 금지·이력 상실 명시 승인)**. F8.1/F8.8/A112/AS8·보안 불변. → **F8 UX R1~R3 반영.**
-- **v0.6 최종 통합감사(codex+agy·교차기능 4건·전부 반영):** 단일기능 감사가 놓친 cross-feature 결함 — **#1 공유 config clobber**(F3/F7/F8 writer가 `evals`·`projectsHome` 소거 → canonical 전 필드 스키마+passthrough+per-leaf 보존 RMW·F3.7)·**#2 `manifest.agent` 스키마 모순**(published Manifest에 additive optional `agent` 추가·마이그레이션 테스트·"무변경" 과claim 정정·F2.1)·**#3 F4/F6/F8 리더 경화 갭**(공용 경화 바운드-리더=realpath 앵커·전 하위 세그먼트 심링크/reparse 거부·O_NOFOLLOW·containment·F4.3·A50/A60/A102)·**#4 F8→F7 crypto 강제 갭**(F7 PUT `evalProposal` 필드+DW11로 envelope·nonce·게이트 재평가 실집행·일반 편집 우회 차단). 보안 불변식 유지·모순 문구 0.
+- **v0.6 최종 통합감사(codex+agy·교차기능 4건·전부 반영):** 단일기능 감사가 놓친 cross-feature 결함 — **#1 공유 config clobber**(F3/F7/F8 writer가 `evals`·`projectsHome` 소거 → canonical 전 필드 스키마+passthrough+per-leaf 보존 RMW·F3.7·**F9 writer는 R7에서 네 번째로 편입**)·**#2 `manifest.agent` 스키마 모순**(published Manifest에 additive optional `agent` 추가·마이그레이션 테스트·"무변경" 과claim 정정·F2.1)·**#3 F4/F6/F8 리더 경화 갭**(공용 경화 바운드-리더=realpath 앵커·전 하위 세그먼트 심링크/reparse 거부·O_NOFOLLOW·containment·F4.3·A50/A60/A102)·**#4 F8→F7 crypto 강제 갭**(F7 PUT `evalProposal` 필드+DW11로 envelope·nonce·게이트 재평가 실집행·일반 편집 우회 차단). 보안 불변식 유지·모순 문구 0.
 - **v0.6 통합감사 R2(codex+agy·R1이 부른 새 통합 이슈 4건·전부 반영):** **#1 config per-leaf 위반**(`loadConfig`가 `evals`를 통째 파싱 → 한 잎 손상이 서브트리 리셋·형제 clobber → **evals 내부 재귀 leaf-wise 복구·effective=max(값,floor)**·F3.7 `loadEvals`)·**#2 config-hash 데드락**(envelope 전체 config-hash 결속 → `definitionEditEnabled` 토글이 대기 제안을 `409 stale`로 영구 거부 → **envelope=`evals`(Part C)만 해시·운영 플래그 제외**·F8.3/A107/DW11)·**#3 edit/proposal 미분리**(일반 편집=상시 허용·우회 아님·**envelope는 "승인된 제안" 주장에만 강제**·DW11)·**#4 공용 리더 앵커 하드코딩**(`isWithinRoot(_workspace/runs)` 고정 → F8 `<state_home>/evals-rollup` 실패 → **앵커 파라미터화**·방어 규율 동일·A50/A60/A102). 보안 불변식 유지·모순 문구 0.
 - **v0.6 통합감사 R3(agy no-high·codex 1건·반영):** **F8 ingest 소유권·트리거 미정의 정정** — Part A "API 읽기전용"인데 서명 rollup/receipt는 쓰기 필요·writer/트리거 미정의(GET lazy-ingest면 읽기전용 위반). **택(a) 채택: ingest=서버 부팅/주기 백그라운드 잡**(요청 무관·검증→원자 commit(scorecard durable→receipt→rollup head 재서명)·바운드·dedup·검증분만)·**전 `GET /api/evals*` side-effect 0**·수동 재구축은 인증 mutating `POST /api/evals/rebuild`(택(b) 패턴). "읽기전용"은 GET 뷰 한정 명확화(F8.1/F8.2/A102).
 - **v0.6 통합감사 R4(agy no-high·codex 2건·R2/R3 파생·반영):** **#1 F2 정의 삭제 천장우회**(template↔제출 사이 정의 삭제/변경 → D 재도출 불가한데 실행 허용=U⊆D 우회 → **제출 시점 정의 재조회·D 재도출·pathId/해시 변경 시 `409 agent-definition-changed`**·F2.3/A66)·**#2 F8 nonce 수명주기**(R3가 GET을 side-effect 0으로 만들어 nonce 발급 고아 + write 前 소비 시 크래시 유실 → **발급=`POST …/prepare`(mutating·GET 아님)·`issued→applying→consumed` 원자 상태머신·멱등 재시도(크래시 유실 0·중복적용 0)**·F8.3/DW11/A107). 보안 불변식 유지·모순 문구 0. → **v0.6 통합 수렴.**
