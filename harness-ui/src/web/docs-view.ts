@@ -4,8 +4,8 @@ import type { DocsNode } from "./api.js";
 
 // 브레드크럼 — "design/spec.md" → [{name:"docs",path:""},{name:"design",path:"design"},{name:"spec.md",path:"design/spec.md"}].
 // 루트("docs") 항상 선두. 각 항목의 path 는 누적(클릭 시 트리 포커스용). 파일/디렉토리 무관.
-export function breadcrumbTrail(rel: string): Array<{ name: string; path: string }> {
-  const trail: Array<{ name: string; path: string }> = [{ name: "docs", path: "" }];
+export function breadcrumbTrail(rel: string, rootLabel = "docs"): Array<{ name: string; path: string }> {
+  const trail: Array<{ name: string; path: string }> = [{ name: rootLabel, path: "" }];
   const segs = (rel ?? "").split("/").filter(Boolean);
   let acc = "";
   for (const s of segs) {
@@ -26,8 +26,9 @@ export function isMarkdownName(name: string): boolean {
 function joinPosix(...parts: string[]): string {
   return parts.filter(Boolean).join("/").replace(/\/+/g, "/");
 }
-export function localDocPath(projectRoot: string, rel: string): string {
-  return joinPosix(projectRoot, "docs", rel);
+// F9(M14): 소스 상대경로(sourcePath) 하위. 기본 "docs"(레거시 하위호환·기존 테스트 정합).
+export function localDocPath(projectRoot: string, rel: string, sourcePath = "docs"): string {
+  return joinPosix(projectRoot, sourcePath, rel);
 }
 export function localArtifactPath(projectRoot: string, runId: string, name: string): string {
   return joinPosix(projectRoot, "_workspace", "runs", runId, "artifacts", name);

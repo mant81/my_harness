@@ -189,4 +189,37 @@ describe("config: 디스크 RMW + projectsHome 불변 assert (A71·S-A2·V9)", (
     const after = await updateConfig({ projectRoot: "/ph/app" });
     expect(after.projectRoot).toBe("/ph/app");
   });
+
+  // R3 codex HIGH-2(passthrough 불변식) — 명시 lock 테스트. loadConfig 왕복 + 여러 writer(F9 docs-sources·
+  //   F3 projectRoot) 저장 후에도 미지/미래 top-level 필드가 소거되지 않음(config.ts:77 `...obj`).
+  //   중첩 미지 객체·다수 미지 키까지 커버(디스크 재-read 로 최종 확인).
+  it("R3 HIGH-2: 미지 top-level 필드가 loadConfig 왕복 + docs-sources/projectRoot 저장 후에도 보존", async () => {
+    await writeFile(configPath(), JSON.stringify({
+      schemaVersion: "1", projectsHome: "/ph", projectRoot: "/ph/app", definitionEditEnabled: true,
+      evals: { threshold: 0.9 },
+      futureField: { nested: { deep: 42 }, arr: [1, 2, 3] }, // 미지 top-level(중첩)
+      anotherUnknown: "keep-me",
+    }), "utf8");
+    // (a) loadConfig 왕복 보존
+    const rt = loadConfig(JSON.parse(await readFile(configPath(), "utf8")));
+    expect((rt as Record<string, unknown>).futureField).toEqual({ nested: { deep: 42 }, arr: [1, 2, 3] });
+    expect((rt as Record<string, unknown>).anotherUnknown).toBe("keep-me");
+    // (b) F9 docs-sources 저장 → 미지 필드·형제 known 필드 동시 보존
+    const a1 = await updateConfig({ docsSources: [{ label: "X", path: "documentation" }], docsMenuEnabled: false });
+    expect((a1 as Record<string, unknown>).futureField).toEqual({ nested: { deep: 42 }, arr: [1, 2, 3] });
+    expect((a1 as Record<string, unknown>).anotherUnknown).toBe("keep-me");
+    expect(a1.projectRoot).toBe("/ph/app");            // F3 필드 보존
+    expect(a1.definitionEditEnabled).toBe(true);        // F7 필드 보존
+    expect(a1.evals).toEqual({ threshold: 0.9 });       // F8 필드 보존
+    // (c) F3 projectRoot 저장 → 여전히 미지 필드 보존(공유 config 회귀 0)
+    const a2 = await updateConfig({ projectRoot: "/ph/app2" });
+    expect((a2 as Record<string, unknown>).futureField).toEqual({ nested: { deep: 42 }, arr: [1, 2, 3] });
+    expect((a2 as Record<string, unknown>).anotherUnknown).toBe("keep-me");
+    expect(a2.docsSources).toEqual([{ label: "X", path: "documentation" }]); // F9 이전 저장 보존
+    // (d) 디스크 최종 재-read 로 영구 보존 확인(영구 소실 없음)
+    const disk = JSON.parse(await readFile(configPath(), "utf8"));
+    expect(disk.futureField).toEqual({ nested: { deep: 42 }, arr: [1, 2, 3] });
+    expect(disk.anotherUnknown).toBe("keep-me");
+    expect(disk.projectsHome).toBe("/ph"); // 힌트 전용·불변 보존
+  });
 });

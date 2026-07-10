@@ -27,6 +27,13 @@ async function writeRun(root: string, loop: string, stage: string, run: string, 
   await writeFile(join(dir, "scorecard.json"), content, "utf8");
 }
 
+// window 정렬 결정화용 실시간 갭. 제품(runs.ts:enumerateRunsBounded)은 run dir 의 **birthtime**(finite 시
+//   mtime 대신 우선)으로 recordedAtMs 를 산출한다 — 이 FS 에선 birthtime 이 finite 이고 `utimesSync` 로는
+//   birthtime 을 못 바꾼다(atime/mtime 만). 게다가 근접 mkdir 는 같은 ms tick birthtime 을 공유하므로,
+//   재기록(동일 runId 다른 위치) 시나리오의 window 순서는 **생성 순서 + tick 분리**로만 결정화 가능하다.
+//   → 순서가 중요한 지점에만 실시간 갭(≥1 ms tick)을 넣어 부하·wall-clock 무관하게 birthtime 을 단조화.
+const nap = (ms = 30) => new Promise<void>((r) => setTimeout(r, ms));
+
 describe("evals Part A — 읽기 (A102/A103/A104)", () => {
   let root: string;
   beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "hui-ev-")); });
@@ -278,10 +285,23 @@ describe("evals Part B — 제안 게이트 (A105/A106·자동금지)", () => {
   });
 
   it("★ agy#2(b): 동일 runId 중복 → 1건만 집계(부풀림 0·dedup 최신)", async () => {
-    await seedFiringLoop("Ldup");
-    // 동일 runId(r-10)을 다른 stage(s2)에 중복 기록 → dedup 후 1건.
-    await writeRun(root, "Ldup", "s2", "r-10", consistentCard("Ldup", "s2", "r-10", 7, 3));
-    const p = await loopProposal(root, "Ldup", stage3());
+    // 결정화(H1): window 정렬은 birthtime(ms tick)·by-design. 중복 재기록(s2 r-10)의 생성 시각을
+    //   s1 r-10 직후·r-11 이전으로 실시간 갭 고정 → 부하·wall-clock 무관하게 r-10 이 slot10 유지(하락
+    //   streak 0.8→0.7→0.6→0.5 보존)·dedup 은 최신(s2) 1건. seedFiringLoop 를 인라인해 갭을 배치한다.
+    const loop = "Ldup";
+    for (let i = 1; i <= 8; i++) {
+      const run = `r-${String(i).padStart(2, "0")}`;
+      await writeRun(root, loop, "s1", run, consistentCard(loop, "s1", run, 3, 2)); // 0.6
+    }
+    await writeRun(root, loop, "s1", "r-09", consistentCard(loop, "s1", "r-09", 4, 1)); // 0.8
+    await writeRun(root, loop, "s1", "r-10", consistentCard(loop, "s1", "r-10", 7, 3)); // 0.7
+    await nap(); // s2 r-10 이 s1 r-10 보다 엄격히 늦은 tick(dedup 최신 결정) — 단 r-11 이전
+    await writeRun(root, loop, "s2", "r-10", consistentCard(loop, "s2", "r-10", 7, 3)); // 0.7(중복·slot10)
+    await nap(); // r-11 은 s2 r-10 보다 늦은 tick
+    await writeRun(root, loop, "s1", "r-11", consistentCard(loop, "s1", "r-11", 3, 2)); // 0.6
+    await nap(); // r-12 는 r-11 보다 늦은 tick
+    await writeRun(root, loop, "s1", "r-12", consistentCard(loop, "s1", "r-12", 1, 1)); // 0.5
+    const p = await loopProposal(root, loop, stage3());
     expect(p.gate!.fires).toBe(true);
     const ids = p.provenance!.runIds;
     expect(new Set(ids).size).toBe(ids.length);          // 중복 runId 없음(부풀림 0)

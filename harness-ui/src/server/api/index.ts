@@ -22,7 +22,11 @@ import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
 import { cancelRun } from "../supervisor/reconcile.js";
 import { join as pjoin } from "node:path";
-import { projectsHomeFromEnv, updateConfig, loadConfigFromDisk } from "../lib/config.js";
+import { projectsHomeFromEnv, updateConfig, loadConfigFromDisk, type ConfigPatch } from "../lib/config.js";
+import {
+  validateDocsSourcePath, lexicalValidate, sourceId,
+  MAX_DOCS_SOURCES, MAX_DOCS_PATH_LEN, MAX_DOCS_LABEL_LEN,
+} from "../lib/docssources.js";
 import { validateProjectRoot, revalidateForPersist } from "../lib/projectroot.js";
 import { listEvalLoops, loopTrend, scorecardDetail, loopProposal } from "../adapters/evals.js";
 import { loadEvalsConfig, updateEvalsConfig, EvalsConfigBody } from "../lib/evalsconfig.js";
@@ -265,17 +269,112 @@ export function registerApi(app: FastifyInstance, projectRoot: string): void {
   // F5 docs 뷰어(DV1~DV9): 트리(화이트루트 docs/ 재귀) + 파일 열람. 읽기전용(I8).
   // 미리보기(기본) = JSON {content,mime,renderable,binary,truncated,size}(원문 텍스트·sanitize는 클라).
   // ?download=1 = attachment 원본(다운로드 前 413·중간중단 금지). 두 응답 모두 엄격 CSP + nosniff.
-  app.get("/api/docs", async () => docsTree(projectRoot));
-  app.get<{ Params: { "*": string }; Querystring: { download?: string } }>("/api/docs/*", async (req, reply) => {
+  //
+  // F9(M14): 다중 소스 확장. 무 source = 기본 `docs`(레거시·config 미읽음·완전 하위호환).
+  //   ?source=<id> = config docsSources 해석. **요청마다 loadConfigFromDisk()** 최신본을 읽어 Settings 변경
+  //   즉시 반영(모듈 상수 캐시 금지·R1). (F3 projectRoot 는 모듈 상수 캡처라 재시작 필요 — 성격 차이.)
+  //   소스 경로는 **serve 시점 validateDocsSourcePath 재검증**(DS7 TOCTOU·등록 후 심링크 스왑 차단).
+
+  // 등록 소스 목록 {id,label,path,valid,enabled}. valid=경로 검증 통과·enabled=docsMenuEnabled.
+  app.get("/api/docs/sources", async () => {
+    const cfg = await loadConfigFromDisk();
+    const enabled = cfg.docsMenuEnabled;
+    const sources = [];
+    for (const s of cfg.docsSources) {
+      const v = await validateDocsSourcePath(s.path, projectRoot);
+      sources.push({ id: sourceId(s.path), label: s.label, path: s.path, valid: v.ok, enabled });
+    }
+    return { enabled, sources };
+  });
+
+  app.get<{ Querystring: { source?: string } }>("/api/docs", async (req, reply) => {
+    const id = req.query.source;
+    if (id === undefined) return docsTree(projectRoot); // 레거시 하위호환(무설정·config 미읽음)
+    const cfg = await loadConfigFromDisk();
+    if (!cfg.docsMenuEnabled) return { enabled: false, root: null, tree: [], count: 0, truncated: false };
+    const s = cfg.docsSources.find((x) => sourceId(x.path) === id);
+    if (!s) return reply.code(400).send({ error: "invalid-source" });
+    const v = await validateDocsSourcePath(s.path, projectRoot); // DS7 재검증
+    // L1: 세 분기 동형 shape {enabled,root,tree,count,truncated}. 무효 소스 = 빈 트리(enabled 유지).
+    if (!v.ok) return { enabled: true, root: s.path, tree: [], count: 0, truncated: false };
+    return { enabled: true, ...(await docsTree(projectRoot, v.base, s.path)) };
+  });
+
+  app.get<{ Params: { "*": string }; Querystring: { download?: string; source?: string } }>("/api/docs/*", async (req, reply) => {
     const rel = req.params["*"] ?? "";
     const segs = rel.split("/");
-    const base = join(projectRoot, "docs");
-    const r = await openSafeFile(projectRoot, base, segs, { denyPath: deniedDocsPath, isSafeSeg: isSafeDocsSegment });
+    let base: string;
+    let ancestors: string[] | undefined;
+    const id = req.query.source;
+    if (id === undefined) {
+      base = join(projectRoot, "docs"); // 레거시 하위호환
+    } else {
+      const cfg = await loadConfigFromDisk();
+      // 토글 정합(informational LOW): 파일 열람도 트리 라우트와 동일하게 docsMenuEnabled=false면 비활성.
+      //   (보안경계 아님 — 트리↔열람 토글 일관성. 무 source 레거시 경로는 미게이트·하위호환.)
+      if (!cfg.docsMenuEnabled) return reply.code(404).send({ error: "docs-menu-disabled" });
+      const s = cfg.docsSources.find((x) => sourceId(x.path) === id);
+      if (!s) return reply.code(400).send({ error: "invalid-source" });
+      const v = await validateDocsSourcePath(s.path, projectRoot); // DS7 TOCTOU 재검증(등록 신뢰 금지)
+      if (!v.ok) return reply.code(400).send({ error: v.error });
+      base = v.base;
+      // openSafeFile 은 projectRoot→base 중간 조상 심링크를 walk 하지 않음 → ancestors 로 전달(전 세그먼트 커버).
+      ancestors = v.segs.slice(0, -1).map((_, i) => join(projectRoot, ...v.segs.slice(0, i + 1)));
+    }
+    const r = await openSafeFile(projectRoot, base, segs, { denyPath: deniedDocsPath, isSafeSeg: isSafeDocsSegment, ancestors });
     if (!r.ok) return reply.code(r.code).send({ error: r.error });
     try {
       if (req.query.download !== undefined) return await sendDownload(reply, r, DOWNLOAD_MAX);
       return await sendPreview(reply, r, rel, VIEW_MAX);
     } finally { await r.fh.close().catch(() => {}); }
+  });
+
+  // F9 소스 설정 쓰기(mutating → security.ts onRequest 훅이 Host/Origin/token 자동 게이트). config 만 쓰기(I8·F3 축).
+  //   Zod strict(DS6 개수/길이/미지필드 400) → 중복 경로 병합 → 각 경로 DS1~DS5 검증. dryRun = 프리뷰(디스크 미변경).
+  //   무효 경로(write) → 400·config 미기록(취소 시 무변경·DS8 fail-closed).
+  const DocsSourceEntry = z.object({
+    label: z.string().min(1).max(MAX_DOCS_LABEL_LEN),
+    path: z.string().min(1).max(MAX_DOCS_PATH_LEN),
+  }).strict();
+  const DocsSourcesBody = z.object({
+    docsSources: z.array(DocsSourceEntry).max(MAX_DOCS_SOURCES),
+    docsMenuEnabled: z.boolean().optional(),
+    dryRun: z.boolean().optional().default(false),
+  }).strict();
+  app.post("/api/settings/docs-sources", async (req, reply) => {
+    const parsed = DocsSourcesBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const { docsSources, docsMenuEnabled, dryRun } = parsed.data;
+    // DS6 중복 경로 병합 — 병합 키·저장 path 를 **canonical rel**(lexicalValidate 세그먼트 재조합)로 정규화.
+    //   lexical-equivalent 경로(`docs`·`./docs`·`docs//`·`docs/.`)를 한 소스로 흡수하고 sourceId 를 안정화(A115).
+    //   lexical 실패 경로는 원본 보존(아래 validateDocsSourcePath 가 invalid 로 보고·저장 아님). 첫 등장 라벨 유지.
+    const seen = new Set<string>();
+    const merged: { label: string; path: string }[] = [];
+    for (const s of docsSources) {
+      const lex = lexicalValidate(s.path);
+      const canonical = lex.ok ? lex.segs.join("/") : s.path.normalize("NFC");
+      if (seen.has(canonical)) continue;
+      seen.add(canonical);
+      merged.push({ label: s.label, path: lex.ok ? canonical : s.path });
+    }
+    // 각 경로 DS1~DS5 검증(valid + error 코드).
+    const results = [];
+    for (const s of merged) {
+      const v = await validateDocsSourcePath(s.path, projectRoot);
+      results.push({ id: sourceId(s.path), label: s.label, path: s.path, valid: v.ok, error: v.ok ? null : v.error });
+    }
+    if (dryRun) {
+      // DS8 dryRun: 디스크 미변경 프리뷰(per-소스 유효성·인라인 에러용·A119). 무효 있어도 200(프리뷰).
+      return { ok: true, dryRun: true, written: false, docsMenuEnabled: docsMenuEnabled ?? true, sources: results };
+    }
+    const invalid = results.filter((r) => !r.valid);
+    if (invalid.length) {
+      return reply.code(400).send({ error: "invalid-source", invalid: invalid.map((r) => ({ path: r.path, error: r.error })) });
+    }
+    const patch: ConfigPatch = { docsSources: merged };
+    if (docsMenuEnabled !== undefined) patch.docsMenuEnabled = docsMenuEnabled;
+    const next = await updateConfig(patch); // RMW·뮤텍스·타 필드 보존
+    return { ok: true, written: true, docsSources: next.docsSources, docsMenuEnabled: next.docsMenuEnabled };
   });
 
   // F6 metrics(M9 · 계층 B 읽기전용 집계). 입력 clamp·Zod. 빈/손상/디렉토리없음 → 안전 빈 응답(에러 아님).

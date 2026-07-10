@@ -92,7 +92,8 @@ export async function submitRun(body: unknown): Promise<RunSubmitResult> {
 export type DocsNode =
   | { type: "dir"; name: string; path: string; children: DocsNode[] }
   | { type: "file"; name: string; path: string; ext: string };
-export type DocsTree = { root: "docs"; tree: DocsNode[]; count: number; truncated: boolean };
+// F9(M14): 무 source(레거시) → root:"docs". ?source= → root=소스 상대경로·enabled 동반. root 를 string 으로 완화.
+export type DocsTree = { root: string; tree: DocsNode[]; count: number; truncated: boolean; enabled?: boolean };
 export type DocPreview = {
   path: string; name: string; mime: string; size: number;
   renderable: boolean; binary: boolean; truncated: boolean; content: string | null;
@@ -101,6 +102,58 @@ export type DocPreview = {
 // 상대경로 → URL(세그먼트별 인코딩·구분자 슬래시 보존). 서버가 rel.split("/") 로 세그먼트 재검증.
 export function encodeDocPath(rel: string): string {
   return rel.split("/").map(encodeURIComponent).join("/");
+}
+
+// ── F9 Docs 다중 소스(M14) — 소스 인지 경로 빌더(?source=<id> 쿼리). source null → 레거시(무 source) ──
+// 서버 확정 계약(server-builder 완료·이대로 소비):
+//   GET /api/docs/sources → { enabled:boolean, sources:[{id,label,path,valid,enabled}] }  (id=경로 sha256 16자 opaque)
+//   GET /api/docs?source=<id> → { root, tree, count, truncated, enabled }  (docsMenuEnabled=false→{enabled:false,tree:[]}·미등록 id→400 invalid-source)
+//   GET /api/docs/*?source=<id>[&download=1] → sendPreview shape 또는 attachment
+export function docsTreePath(source: string | null): string {
+  return source ? `/api/docs?source=${encodeURIComponent(source)}` : "/api/docs";
+}
+export function docPreviewPath(rel: string, source: string | null): string {
+  const base = `/api/docs/${encodeDocPath(rel)}`;
+  return source ? `${base}?source=${encodeURIComponent(source)}` : base;
+}
+export type DocsSourceInfo = { id: string; label: string; path: string; valid: boolean; enabled: boolean };
+export type DocsSourcesList = { enabled: boolean; sources: DocsSourceInfo[] };
+
+// 소스 설정 쓰기(mutating·config RMW·타 필드 보존은 서버 권위). dryRun=true → 프리뷰(디스크 미변경·per-소스 유효성).
+export type DocsSourceDryRun = { id: string; label: string; path: string; valid: boolean; error: string | null };
+export type DocsSourcesDryRunResult = { ok: true; dryRun: true; written: false; docsMenuEnabled: boolean; sources: DocsSourceDryRun[] };
+export type DocsSourcesSaved = { ok: true; written: true; docsSources: Array<{ label: string; path: string }>; docsMenuEnabled: boolean };
+
+// 400 거부를 구조 보존 승격(ProjectRootError/EvalsConfigError 동형). invalid(경로별 error) 보존 → UI 인라인 매핑.
+export class DocsSourcesError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly invalid?: Array<{ path: string; error: string }>,
+  ) {
+    super(code);
+    this.name = "DocsSourcesError";
+  }
+}
+
+// POST /api/settings/docs-sources. dryRun:true → 프리뷰(200·written:false). dryRun:false → 저장(200·written:true) / 무효 400.
+export async function postDocsSources(body: {
+  docsSources: Array<{ label: string; path: string }>; docsMenuEnabled?: boolean; dryRun?: boolean;
+}): Promise<DocsSourcesDryRunResult | DocsSourcesSaved> {
+  const r = await fetch("/api/settings/docs-sources", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { clearSession(); throw new Error("401 인증 만료 — 런처 링크로 재접속"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; invalid?: unknown }));
+    const invalid = Array.isArray(d.invalid)
+      ? d.invalid.map((x: { path?: unknown; error?: unknown }) => ({ path: String(x.path ?? ""), error: String(x.error ?? "") }))
+      : undefined;
+    throw new DocsSourcesError(r.status, String(d.error ?? r.status), invalid);
+  }
+  return r.json() as Promise<DocsSourcesDryRunResult | DocsSourcesSaved>;
 }
 
 // 413 too-large(다운로드 하드상한 초과) — UI 에서 로컬 열기 안내(A98)용 크기·상한 반송.
@@ -128,8 +181,9 @@ async function saveBlob(url: string, filename: string): Promise<void> {
   URL.revokeObjectURL(href);
 }
 
-export function downloadDoc(rel: string, filename: string): Promise<void> {
-  return saveBlob(`/api/docs/${encodeDocPath(rel)}?download=1`, filename);
+export function downloadDoc(rel: string, filename: string, source?: string | null): Promise<void> {
+  const src = source ? `&source=${encodeURIComponent(source)}` : "";
+  return saveBlob(`/api/docs/${encodeDocPath(rel)}?download=1${src}`, filename);
 }
 
 export function downloadArtifact(runId: string, name: string): Promise<void> {

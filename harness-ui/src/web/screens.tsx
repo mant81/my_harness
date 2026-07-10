@@ -8,11 +8,13 @@ import {
 } from "./metrics.js";
 import {
   apiPost, apiGet, fetchArtifact, downloadDoc, downloadArtifact,
-  encodeDocPath, DownloadTooLargeError, submitRun, RunSubmitError,
+  DownloadTooLargeError, submitRun, RunSubmitError,
   postProjectRoot, ProjectRootError, cancelActiveRuns,
   getDefinition, putDefinition, rollbackDefinition, setDefinitionEdit, DefEditError,
   postEvalsConfig, EvalsConfigError,
+  docsTreePath, docPreviewPath, postDocsSources, DocsSourcesError,
   type DocsNode, type DocsTree, type DocPreview,
+  type DocsSourcesList,
   type SettingsInfo, type ProjectRootPreview,
   type DefKind, type DefinitionDoc, type PutDefResult,
   type EvalsIndex, type LoopIndexEntry, type LoopTrend, type TrendPoint,
@@ -32,11 +34,18 @@ import {
 } from "./defedit.js";
 import { projectRootErrorText, canSave, requiresOrphanChoice, type OrphanChoice } from "./settings.js";
 import {
+  docsSourceErrorText, addSourceRow, removeSourceRow, updateSourceRow, moveSourceRow, canAddSource,
+  rowIssue, rowIssueText, rowsLocallyValid, toPayloadSources, dryRunErrorByPath, allSourcesValid,
+  docsSourcesState, pickDefaultSource, focusSourceFromHash, docsSourceDeepLink,
+  MAX_DOCS_LABEL_LEN, MAX_DOCS_PATH_LEN,
+  type SourceRow, type DryRunSource,
+} from "./docs-sources.js";
+import {
   type RunTemplate, type RunSubmitResult,
   toggleSelected, runSubmitErrorText, focusRunFromHash, runsDeepLink,
 } from "./agent-run.js";
 import { renderMarkdown } from "./render.js";
-import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath, focusDocFromHash, docsDeepLink, filterDocTree } from "./docs-view.js";
+import { breadcrumbTrail, isMarkdownName, viewerBanner, localDocPath, localArtifactPath, focusDocFromHash, filterDocTree } from "./docs-view.js";
 import { readErrorText } from "./errors.js";
 import {
   tailDecision, isLiveRunState, isTerminalRunState,
@@ -1122,8 +1131,8 @@ function DocTree({ nodes, selected, onSelect }: { nodes: DocsNode[]; selected: s
 }
 
 // 브레드크럼(A89) — 읽기전용 경로 표시.
-function Breadcrumb({ rel }: { rel: string }) {
-  const trail = breadcrumbTrail(rel);
+function Breadcrumb({ rel, rootLabel = "docs" }: { rel: string; rootLabel?: string }) {
+  const trail = breadcrumbTrail(rel, rootLabel);
   return (
     <nav className="breadcrumb" aria-label="파일 경로">
       {trail.map((t, i) => (
@@ -1136,41 +1145,89 @@ function Breadcrumb({ rel }: { rel: string }) {
   );
 }
 
-// docs 파일 미리보기 패널 — 트리와 독립 로딩(A83). 3-state.
-function DocPanel({ rel, projectRoot }: { rel: string; projectRoot: string }) {
-  const prev = useApi<DocPreview>(`/api/docs/${encodeDocPath(rel)}`);
+// docs 파일 미리보기 패널 — 트리와 독립 로딩(A83). 3-state. F9(M14): source 지정 시 소스별 열람(?source=).
+function DocPanel({ rel, projectRoot, source, sourcePath, rootLabel }: {
+  rel: string; projectRoot: string; source: string | null; sourcePath: string; rootLabel: string;
+}) {
+  const prev = useApi<DocPreview>(docPreviewPath(rel, source));
   return (
     <Card title={rel}>
-      <Breadcrumb rel={rel} />
+      <Breadcrumb rel={rel} rootLabel={rootLabel} />
       <Async state={prev}>{(p) => (
         <FileViewer model={{
           name: p.name, content: p.content, renderable: p.renderable, binary: p.binary,
-          truncated: p.truncated, size: p.size, localPath: localDocPath(projectRoot, rel),
-          download: () => downloadDoc(rel, p.name),
+          truncated: p.truncated, size: p.size, localPath: localDocPath(projectRoot, rel, sourcePath),
+          download: () => downloadDoc(rel, p.name, source),
         }} />
       )}</Async>
     </Card>
   );
 }
 
-// ── 6. Docs (F5·A53·A59·A89·A98 — 문서/artifact 뷰어) ──
+// ── 6. Docs (F5·A53·A59·A89·A98 · F9 M14 다중 소스 A118·A120) ──
+// 소스 목록(GET /api/docs/sources)을 먼저 조회 → 드롭다운·빈/무효 CTA(A120) 분기. 실제 트리/열람은 DocsBrowser 로 위임.
 export function Docs() {
-  const tree = useApi<DocsTree>("/api/docs");
-  const set = useApi<{ projectRoot: string }>("/api/settings");
-  // U6: ?path= 딥링크 초기 복원(Runs ?run= 패턴 재사용) · 선택 변경 시 URL 반영(새로고침·공유 보존).
-  const [sel, setSel] = useState<string | null>(() => focusDocFromHash(location.hash));
-  const [q, setQ] = useState("");
-  useEffect(() => {
-    history.replaceState(null, "", location.pathname + location.search + docsDeepLink(sel));
-  }, [sel]);
+  const sources = useApi<DocsSourcesList>("/api/docs/sources");
   return (
     <div className="screen">
       <h2>Docs</h2>
+      <Async state={sources}>{(p) => {
+        const state = docsSourcesState(p);
+        if (state === "disabled") return (
+          <div className="empty" role="status">
+            <p className="muted">📴 Docs 메뉴가 비활성화되어 있습니다.</p>
+            <p className="muted">Settings → “Docs 소스” 에서 메뉴를 켜세요. <a className="link" href="#/settings">Settings 열기 →</a></p>
+          </div>
+        );
+        if (state === "no-sources" || state === "all-invalid") return (
+          <div className="empty" role="status">
+            <p className="muted">📂 표시할 산출물 소스가 없습니다{state === "all-invalid" ? "(등록된 소스가 모두 무효)" : ""}.</p>
+            <p className="muted">Settings 에서 문서 소스를 추가하세요. <a className="link" href="#/settings">Settings 에서 추가 →</a></p>
+          </div>
+        );
+        return <DocsBrowser payload={p} />;
+      }}</Async>
+    </div>
+  );
+}
+
+// 소스 선택 + 트리 + 미리보기. 소스 전환 시 선택 파일 초기화(stale 렌더 방지). ?source=/?path= 딥링크 왕복.
+function DocsBrowser({ payload }: { payload: DocsSourcesList }) {
+  const set = useApi<{ projectRoot: string }>("/api/settings");
+  const [source, setSource] = useState<string | null>(() => pickDefaultSource(payload, focusSourceFromHash(location.hash)));
+  const [sel, setSel] = useState<string | null>(() => focusDocFromHash(location.hash));
+  const [q, setQ] = useState("");
+  const tree = useApi<DocsTree>(source ? docsTreePath(source) : null);
+  const cur = payload.sources.find((s) => s.id === source) ?? null;
+  const sourcePath = cur?.path ?? "docs";
+  const rootLabel = cur?.label ?? "docs";
+  // 선택 소스/파일 → URL 반영(새로고침·공유 보존).
+  useEffect(() => {
+    history.replaceState(null, "", location.pathname + location.search + docsSourceDeepLink(source, sel));
+  }, [source, sel]);
+  const onSourceChange = (id: string) => { setSource(id); setSel(null); setQ(""); };
+  return (
+    <>
+      <div className="doc-source-bar">
+        <label className="doc-source-pick">📚 문서 소스
+          <select value={source ?? ""} aria-label="문서 소스 선택"
+            onChange={(e) => onSourceChange(e.target.value)}>
+            {payload.sources.map((s) => (
+              // 무효 소스는 표시하되 비활성 + 이유(A120). 색 비의존(⛔ 아이콘·텍스트 병기).
+              <option key={s.id} value={s.id} disabled={!s.valid}
+                title={s.valid ? s.path : `무효 소스(${s.path}) — Settings 에서 확인·수정 필요`}>
+                {s.valid ? `${s.label} · ${s.path}` : `⛔ ${s.label} · ${s.path} (무효)`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <a className="link doc-source-manage" href="#/settings">소스 관리(Settings) →</a>
+      </div>
       <div className="split">
         {/* A83: 트리 패널은 미리보기와 독립 로딩. 미리보기 실패가 트리를 무너뜨리지 않음 */}
-        <Card title="문서 트리 · docs/ (읽기전용)">
+        <Card title={`문서 트리 · ${rootLabel} (읽기전용)`}>
           <Async state={tree}>{(t) => t.tree.length === 0 ? (
-            <div className="empty" role="status"><p className="muted">📂 docs/ 에 문서 없음</p></div>
+            <div className="empty" role="status"><p className="muted">📂 이 소스에 문서 없음</p></div>
           ) : (() => {
             const shown = filterDocTree(t.tree, q); // U6: 간단 트리 필터(부분일치·대소문자 무시)
             return (
@@ -1186,10 +1243,11 @@ export function Docs() {
           })()}</Async>
         </Card>
         {sel
-          ? <DocPanel key={sel} rel={sel} projectRoot={set.data?.projectRoot ?? ""} />
+          ? <DocPanel key={`${source}:${sel}`} rel={sel} source={source} sourcePath={sourcePath}
+              rootLabel={rootLabel} projectRoot={set.data?.projectRoot ?? ""} />
           : <Card title="미리보기"><p className="muted">좌측에서 파일을 선택하세요.</p></Card>}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -1349,6 +1407,9 @@ function SettingsBody({ info, onSaved }: { info: SettingsInfo; onSaved: () => vo
       {/* F7 A78/A85: 정의 편집 게이트 토글 — off 기본·고위험 인지 후 활성. off 시 편집기 뷰어 전용 */}
       <DefinitionEditToggle enabled={info.definitionEditEnabled} onSaved={onSaved} />
 
+      {/* F9 A118/A119: Docs 소스 편집기 + 메뉴 토글 — 자체 3-state(GET /api/docs/sources). 조회 실패가 상단 설정을 무너뜨리지 않음 */}
+      <DocsSourcesEditor />
+
       {/* A85/A99/A101: dryRun 프리뷰 확인 다이얼로그 → "저장"=dryRun:false 쓰기. 취소 시 어떤 쓰기도 안 함 */}
       {preview && (
         <ProjectRootConfirm
@@ -1469,6 +1530,129 @@ function DefinitionEditToggle({ enabled, onSaved }: { enabled: boolean; onSaved:
         </ConfirmDialog>
       )}
     </Card>
+  );
+}
+
+// ── F9 A118/A119 Docs 소스 편집기 + 메뉴 토글 ──
+// 자체 3-state(GET /api/docs/sources). 소스 목록(라벨+경로·추가/삭제/재정렬)·dryRun 검증(per-소스 인라인)·저장.
+// 저장은 요청마다 서버가 재검증(무효 400·config 미기록). dryRun 은 디스크 미변경 프리뷰(A119).
+export function DocsSourcesEditor() {
+  const st = useApi<DocsSourcesList>("/api/docs/sources");
+  return (
+    <Card title="Docs 소스 (F9 · A118/A119)">
+      <Async state={st}>{(p) => <DocsSourcesForm initial={p} onSaved={st.reload} />}</Async>
+    </Card>
+  );
+}
+
+function DocsSourcesForm({ initial, onSaved }: { initial: DocsSourcesList; onSaved: () => void }) {
+  const [rows, setRows] = useState<SourceRow[]>(() => initial.sources.map((s) => ({ label: s.label, path: s.path })));
+  const [menuOn, setMenuOn] = useState<boolean>(initial.enabled);
+  const [busy, setBusy] = useState<"" | "validate" | "save">("");
+  const [preview, setPreview] = useState<DryRunSource[] | null>(null); // dryRun 결과(per-소스 인라인)
+  const [err, setErr] = useState<string | null>(null);                 // 폼 전역 에러(bad-input 등)
+  const [saved, setSaved] = useState(false);                           // 저장 성공 토스트(A85)
+
+  const localValid = rowsLocallyValid(rows);
+  const errByPath = preview ? dryRunErrorByPath(preview) : {};
+  const previewOk = preview ? allSourcesValid(preview) : false;
+
+  const setRow = (i: number, patch: Partial<SourceRow>) => {
+    setRows((r) => updateSourceRow(r, i, patch)); setPreview(null); setSaved(false); setErr(null);
+  };
+  const reorder = (i: number, dir: -1 | 1) => { setRows((r) => moveSourceRow(r, i, dir)); setPreview(null); setSaved(false); };
+  const remove = (i: number) => { setRows((r) => removeSourceRow(r, i)); setPreview(null); setSaved(false); };
+  const add = () => { setRows((r) => addSourceRow(r)); setPreview(null); setSaved(false); };
+
+  // dryRun 검증(디스크 미변경) — per-소스 valid/error 인라인(A119).
+  const doValidate = async () => {
+    setBusy("validate"); setErr(null); setSaved(false); setPreview(null);
+    try {
+      const r = await postDocsSources({ docsSources: toPayloadSources(rows), docsMenuEnabled: menuOn, dryRun: true });
+      if ("sources" in r) setPreview(r.sources);
+    } catch (e) {
+      setErr(e instanceof DocsSourcesError ? docsSourceErrorText(e.code, e.status) : String(e));
+    } finally { setBusy(""); }
+  };
+
+  // 저장(dryRun:false) — 서버 재검증·무효면 400(config 미기록). invalid 배열을 per-경로 인라인으로 승격.
+  const doSave = async () => {
+    setBusy("save"); setErr(null); setSaved(false);
+    try {
+      const r = await postDocsSources({ docsSources: toPayloadSources(rows), docsMenuEnabled: menuOn, dryRun: false });
+      if ("written" in r && r.written) {
+        // 서버 canonical 결과로 폼 재동기화(R5 codex LOW): 중복·lexical-equivalent 병합·정규화된 저장본을 반영
+        // → 저장 배너와 실제 저장본 불일치 제거.
+        if (Array.isArray(r.docsSources)) setRows(r.docsSources.map((s) => ({ label: s.label, path: s.path })));
+        if (typeof r.docsMenuEnabled === "boolean") setMenuOn(r.docsMenuEnabled);
+        setSaved(true); setPreview(null); onSaved();
+      }
+    } catch (e) {
+      if (e instanceof DocsSourcesError) {
+        // invalid(경로별) → dryRun 프리뷰 형태로 인라인 표시 재사용. 그 외(bad-input) → 폼 전역.
+        if (e.invalid && e.invalid.length) {
+          setPreview(e.invalid.map((x) => ({ id: x.path, label: "", path: x.path, valid: false, error: x.error })));
+          setErr(docsSourceErrorText(e.code, e.status));
+        } else setErr(docsSourceErrorText(e.code, e.status));
+      } else setErr(String(e));
+    } finally { setBusy(""); }
+  };
+
+  return (
+    <>
+      {/* A118: Docs 메뉴 on/off 스위치(색 비의존·라벨 병기·키보드). off = 사이드바 Docs 비활성 */}
+      <label className="check docs-menu-toggle">
+        <input type="checkbox" checked={menuOn} role="switch" aria-checked={menuOn}
+          onChange={(e) => { setMenuOn(e.target.checked); setSaved(false); }} />
+        Docs 메뉴 표시 {menuOn ? <Badge kind="ok">켜짐</Badge> : <Badge kind="muted">꺼짐(사이드바 숨김)</Badge>}
+      </label>
+
+      <p className="muted full">각 소스는 라벨 + projectRoot 하위 상대경로입니다(예: <code>docs</code>·<code>documentation/api</code>). 절대경로·<code>..</code>·심링크는 거부됩니다.</p>
+
+      {rows.length === 0
+        ? <p className="muted" role="status">등록된 소스가 없습니다 · “소스 추가”로 문서 폴더를 등록하세요(비우면 Docs 화면이 빈 상태가 됩니다).</p>
+        : (
+          <ul className="docs-source-list">
+            {rows.map((row, i) => {
+              const issue = rowIssue(row);
+              const perr = errByPath[row.path.trim()]; // dryRun/저장 거부의 per-경로 에러(undefined=미검증)
+              return (
+                <li key={i} className="docs-source-row">
+                  <input className="src-label" value={row.label} placeholder="라벨" maxLength={MAX_DOCS_LABEL_LEN}
+                    aria-label={`소스 ${i + 1} 라벨`} onChange={(e) => setRow(i, { label: e.target.value })} />
+                  <input className="src-path path" value={row.path} placeholder="상대경로 (예: docs)" maxLength={MAX_DOCS_PATH_LEN}
+                    spellCheck={false} aria-label={`소스 ${i + 1} 경로`}
+                    aria-invalid={issue || perr ? "true" : undefined} onChange={(e) => setRow(i, { path: e.target.value })} />
+                  <div className="src-actions">
+                    <button type="button" aria-label={`소스 ${i + 1} 위로`} disabled={i === 0} onClick={() => reorder(i, -1)}>↑</button>
+                    <button type="button" aria-label={`소스 ${i + 1} 아래로`} disabled={i === rows.length - 1} onClick={() => reorder(i, 1)}>↓</button>
+                    <button type="button" aria-label={`소스 ${i + 1} 삭제`} onClick={() => remove(i)}>✕ 삭제</button>
+                  </div>
+                  {/* 인라인 유효성: 로컬(빈/길이) 우선, 그다음 서버 dryRun/저장 거부(A119 한국어) */}
+                  {issue && <p className="src-issue err" role="alert">⚠ {rowIssueText(issue)}</p>}
+                  {!issue && perr && <p className="src-issue err" role="alert">⚠ {docsSourceErrorText(perr)}</p>}
+                  {!issue && preview && perr === null && <p className="src-issue ok" role="status">✓ 유효</p>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+      <div className="detail-actions">
+        <button type="button" disabled={!canAddSource(rows)} onClick={add}>＋ 소스 추가</button>
+        <button type="button" disabled={busy !== "" || !localValid} onClick={doValidate}>
+          {busy === "validate" ? "검증 중…" : "검증 (미리보기)"}
+        </button>
+        <button className="primary" type="button" disabled={busy !== "" || !localValid || !previewOk} onClick={doSave}>
+          {busy === "save" ? "저장 중…" : "저장 (config 쓰기)"}
+        </button>
+      </div>
+      <p className="muted full">저장하려면 먼저 “검증(미리보기)”으로 모든 소스가 유효해야 합니다(디스크 미변경). 무효 소스가 있으면 저장이 거부됩니다.</p>
+
+      {err && <p className="banner err" role="alert">⚠ {err}</p>}
+      {preview && previewOk && !saved && <p className="banner ok" role="status">✓ 모든 소스 유효 · 저장할 수 있습니다.</p>}
+      {saved && <p className="banner ok" role="status">✓ 소스 설정이 저장되었습니다(즉시 반영 · 재시작 불필요).</p>}
+    </>
   );
 }
 

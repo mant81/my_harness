@@ -12,13 +12,36 @@ import { writeJsonAtomic } from "./atomic.js";
 export const CONFIG_SCHEMA_VERSION = "1" as const;
 const MAX_CONFIG_BYTES = 262144; // config.json 개별 크기 상한(256KB·OOM 방어)
 
+export interface DocsSource { label: string; path: string } // F9(M14): 표시 소스. path=projectRoot 하위 상대.
+
 export interface Config_v06 {
   schemaVersion: "1";
   projectsHome: string | null;       // read-only 힌트/폴백만(경계 SSOT 아님 — env HARNESS_PROJECTS_HOME 가 SSOT).
   projectRoot: string | null;        // 편집 API 가 RMW 하는 유일 mutable 경로 필드.
   definitionEditEnabled: boolean;    // F7 게이트(불변 기본 false·fail-closed).
   evals: Record<string, unknown> | null; // F8 서브객체(M11 은 골격만·형제 보존 계약 확립).
+  docsSources: DocsSource[];         // F9(M14·additive): 표시 소스 목록. 기본 [{Docs,docs}]·경로안전은 write/serve 시점 검증.
+  docsMenuEnabled: boolean;          // F9(M14·additive): Docs 메뉴 on/off. 기본 true.
   [k: string]: unknown;              // root passthrough(미지/미래 필드 보존).
+}
+
+// F9 기본 소스(무설정 구 config → docs 단일 소스·무인자 하위호환). label=플랜 A-1 확정("Docs").
+export const DEFAULT_DOCS_SOURCES: DocsSource[] = [{ label: "Docs", path: "docs" }];
+const cloneDefaultDocsSources = (): DocsSource[] => DEFAULT_DOCS_SOURCES.map((s) => ({ ...s }));
+
+// F9 per-leaf 복구: 봉투의 docsSources 잎을 요소별 safeParse. 손상(비-배열/부재/null)=기본 소스 드롭백,
+//   배열이면 무효 요소만 제외·유효 형제 소스 보존(빈 배열 가능 = 사용자가 전 소스 삭제한 정상 상태).
+//   경로 안전(DS1~DS6)은 여기서 판정하지 않는다 — write/serve 시점 validateDocsSourcePath 소관(valid 플래그로 노출).
+const DocsSourceSchema = z.object({ label: z.string(), path: z.string() });
+export function loadDocsSources(raw: unknown): DocsSource[] {
+  if (raw === undefined || raw === null) return cloneDefaultDocsSources();
+  if (!Array.isArray(raw)) return cloneDefaultDocsSources(); // 손상 잎 → 기본(fail-closed·형제 top-level 무영향)
+  const out: DocsSource[] = [];
+  for (const el of raw) {
+    const p = DocsSourceSchema.safeParse(el);
+    if (p.success) out.push({ label: p.data.label, path: p.data.path }); // 무효 요소만 드롭
+  }
+  return out;
 }
 
 // evals per-leaf 골격(F8 이 채움). 알려진 잎만 독립 검증 — 한 잎 손상이 형제/미지 필드를 소거하지 않는다.
@@ -59,6 +82,10 @@ export function loadConfig(raw: unknown): Config_v06 {
       ? (obj.definitionEditEnabled as boolean)
       : false, // fail-closed
     evals: loadEvals(obj.evals),
+    docsSources: loadDocsSources(obj.docsSources), // F9 per-leaf(요소별 safeParse·형제 보존)
+    docsMenuEnabled: z.boolean().safeParse(obj.docsMenuEnabled).success
+      ? (obj.docsMenuEnabled as boolean)
+      : true, // 손상/부재 → 기본 true(형제 무영향)
   };
 }
 
@@ -135,7 +162,9 @@ export function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 // RMW 대상 = mutable 필드만. projectsHome 는 patch 타입에서 원천 배제(env SSOT·read-only).
-export type ConfigPatch = Partial<Pick<Config_v06, "projectRoot" | "definitionEditEnabled" | "evals">>;
+export type ConfigPatch = Partial<
+  Pick<Config_v06, "projectRoot" | "definitionEditEnabled" | "evals" | "docsSources" | "docsMenuEnabled">
+>;
 
 // 원자 read-modify-validate-write: 뮤텍스 하 **단일** strict read → loadConfig(전 필드 복구) →
 //   해당 필드만 수정 → 전 필드 재직렬화 → writeJsonAtomic. 뮤텍스로 in-process 직렬화.
@@ -153,6 +182,9 @@ export async function updateConfig(patch: ConfigPatch): Promise<Config_v06> {
     if ("projectRoot" in patch) next.projectRoot = patch.projectRoot ?? null;
     if ("definitionEditEnabled" in patch) next.definitionEditEnabled = patch.definitionEditEnabled ?? false;
     if ("evals" in patch) next.evals = patch.evals ?? null;
+    // F9: docsSources 는 []([빈] = 전 소스 삭제한 정상 상태)를 default 로 덮지 않음(nullish 만 default).
+    if ("docsSources" in patch) next.docsSources = patch.docsSources ?? cloneDefaultDocsSources();
+    if ("docsMenuEnabled" in patch) next.docsMenuEnabled = patch.docsMenuEnabled ?? true;
     // S-A2 불변 assert: patch 경로가 projectsHome 을 바꾸지 않았음(타입상 불가하나 이중 방어).
     if (next.projectsHome !== before.projectsHome) throw new Error("projectsHome-mutation-blocked");
     await writeJsonAtomic(configPath(), next); // atomic.ts 재사용

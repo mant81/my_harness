@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Overview, Build, Agents, Skills, Runs, Docs, Drift, Ops, Eval, Settings } from "./screens.js";
 import { probeConnection } from "./api.js";
+import { useApi } from "./ui.js";
+import type { DocsSourcesList } from "./api.js";
 import { nextConn, showsReconnecting, backoffMs, READY_POLL_MS, type ConnPhase } from "./connection.js";
 
 const SCREENS = [
@@ -75,6 +77,9 @@ export function App() {
   const idOf = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "overview";
   const [cur, setCur] = useState<string>(idOf);
   const phase = useConnection();
+  // A118: docsMenuEnabled=false → 사이드바 Docs 비활성+이유 툴팁. 로드 전엔 활성 가정(플리커 방지). 실패해도 기본 활성.
+  const docsSources = useApi<DocsSourcesList>("/api/docs/sources");
+  const docsEnabled = docsSources.data?.enabled ?? true;
   useEffect(() => {
     const on = () => setCur(idOf());
     window.addEventListener("hashchange", on);
@@ -86,9 +91,14 @@ export function App() {
     <div className="app">
       <nav className="sidebar">
         <div className="brand">Harness UI <span className="ver">v0.6</span></div>
-        {SCREENS.map((s) => (
-          <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>{s.label}</a>
-        ))}
+        {SCREENS.map((s) => {
+          // A81/A118: Docs 메뉴 off → 비활성 링크(이유 툴팁·클릭 무효). 빈 disabled 금지 = 사유 명시.
+          if (s.id === "docs" && !docsEnabled) return (
+            <span key={s.id} className="navlink disabled" aria-disabled="true"
+              title="Docs 메뉴가 꺼져 있습니다 · Settings → Docs 소스에서 켜세요">{s.label}</span>
+          );
+          return <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>{s.label}</a>;
+        })}
       </nav>
       <main className="body"><Body /></main>
       {/* A94: 전역 재연결/재인증 오버레이 — 통신에러 흡수(개별 토스트 폭주 금지·W-C4) */}
