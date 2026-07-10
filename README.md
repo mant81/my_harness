@@ -245,6 +245,17 @@ myharness lives at the **meta-factory** layer of the Claude Code agent ecosystem
 | [LangGraph](https://langchain-ai.github.io/langgraph/) | State-graph orchestration, LLM-agnostic | A different track. LangGraph = long-running & state recovery, myharness = fast, Claude Code-native team design |
 | [wshobson/agents](https://github.com/wshobson/agents) | A catalog of subagents/skills | Parts supply ↔ factory. Pick parts from the catalog and absorb them into the team myharness designs |
 
+## Companion: My Harness Web
+
+A local web panel that **observes and controls** a built harness. It reads the file state under `_workspace/runs/**` and surfaces inventory, executions, history, documents, drift, and evaluation on one screen — the things the CLI can't show at a glance.
+
+- **Run:** `cd harness-ui && npm install && npm start` — builds, serves a single origin on `127.0.0.1:5174`, and opens the browser with a one-time (fragment) token. Dev mode: `npm run dev`.
+- **Screens (grouped sidebar):** Overview · New Run / History · Agents / Skills / Context · Docs · Drift / Ops / Eval · Settings. Flow: New Run → run created → observe in History (fire-and-observe).
+- **Security & scope:** local 127.0.0.1 only · token bootstrap → session · read-first (the only mutating paths are definition editing, projectRoot, and eval config — whitelisted, atomic, gated off by default). History/stats reflect **UI-launched runs only**; terminal CLI runs are out of scope until v0.7 (CLI session-log observability).
+- **Docs:** [`docs/harness-ui/`](docs/harness-ui/README.md) — v0.5 (certified core) · v0.6 (converged & implemented) · v0.7 (planned). App package: [`harness-ui/`](harness-ui/README.md).
+
+> A distinct sub-project from the factory: the factory *generates* harnesses; My Harness Web *operates* one. Its own version line (v0.5/0.6) is separate from the factory version above.
+
 ## Requirements
 
 - **Claude Code:** [enable agent teams](https://code.claude.com/docs/en/agent-teams) — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`
