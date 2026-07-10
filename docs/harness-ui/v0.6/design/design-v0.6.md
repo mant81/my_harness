@@ -7,6 +7,37 @@
 > 코드 근거: `harness-ui/src/server/adapters/runs.ts`(listRuns=status만 read·getRun·readEvents 스트리밍), `adapters/statestats.ts`(계층 A·readCapped O_NOFOLLOW 256KB·docs/*/working_history 스캔), `api/index.ts`(artifact 서빙 방어: 선계산 realpath 앵커·per-seg isSafeSegment·deniedPath·O_NOFOLLOW·fstat·ARTIFACT_MAX 8MB·nosniff·attachment), `security.ts`(DENY 정규식·Host/Origin/token 게이트·onSend nosniff/no-referrer), `lib/paths.ts`(stateHome·SAFE_SEGMENT·isSafeSegment·isWithinRoot), `index.ts`(projectRoot 모듈 상수·registerApi 주입), `exec-run.ts`(RunRequest Zod·noFlag·buildArgv), `web/screens.tsx`(8화면).
 > 관측성 선안 흡수: `docs/harness-ui/v0.5/design/design-observability.md`(계층 A/B·토큰 신뢰등급표)를 v0.6 정식 편입 — 계층 A는 v0.5 M4에서 출하 완료(A35-A38), **계층 B가 F6**(§F6). 상세는 그 문서를 단일 출처로 참조.
 
+## 용어 정의 (Glossary — 내부 식별자 ↔ 평이한 뜻)
+> 이 문서의 코드형 식별자(F·M·A·I·D·DV·DW·DS·HR·HB·R…)는 **추적·검증용 안정 ID**다(스펙 골격이라 유지). 처음 읽는 사람을 위한 평이한 뜻은 아래 표로 확정한다. **웹 UI에는 이 코드를 노출하지 않고 "사용자 라벨"만 쓴다.**
+
+### 기능·마일스톤·기준
+| ID | 뜻 | 사용자 라벨(UI) |
+|----|-----|----------------|
+| **F-번호**(Feature·기능 단위) | F2 에이전트 프리필 실행·F3 projectRoot 편집·F4 Runs 조회·F5 문서/artifact 뷰어·F6 관측성 계층 B·F7 정의 편집기·F8 Eval·F9 Docs 소스 설정·F10 하네스 컨텍스트 관리+빌더 (F1 대화형=폐기) | F2 "에이전트로 새 실행"·F3 "프로젝트 경로"·F4 "실행 이력"·F5 "문서 뷰어"·F6 "효과성·활용도 지표"·F7 "정의 편집"·F8 "평가"·F9 "문서 소스"·F10 "하네스 구성 관리" |
+| **M-번호**(Milestone·구현 순서) | M7~M15 = F4~F10 순차 구현 단위 | (내부·UI 미노출) |
+| **A-번호**(Acceptance criteria·수용기준) | 기능이 통과해야 할 검증 항목의 고유 번호(A1~A130). 예: A71=프로젝트 경로 편집 안전·A78=편집 허용 노브·A118/A119=문서 소스 UI·A128=컨텍스트 화면 | (내부·UI 미노출) |
+| **S-번호** | PRD의 성공지표(Success metric) | (내부) |
+| **R-번호**(Round) | 외부감사 라운드(R1·R2…) | (내부) |
+
+### 관측성 계층
+| ID | 뜻 | 사용자 라벨 |
+|----|-----|-----------|
+| **계층 A**(Layer A) | 정적 구성/건강도 — 인벤토리·구성 건강도·업데이트 상태·진화 이력. v0.5 출하 | "구성 현황" |
+| **계층 B**(Layer B) | 실행에서 파생된 통계 — 토큰·성공/실패·효과성·활용도. = F6 | "효과성·활용도 지표(실행 관측 기반)" |
+
+### 보안·위협모델 규칙(코드 도메인 방어 ID)
+| ID | 뜻 |
+|----|-----|
+| **I1~I8**(Invariants·불변식) | 깨면 안 되는 보안 원칙(fire-and-observe·stdio 로그·execFile+argv·경로안전·127.0.0.1·읽기전용 등) |
+| **DV1~DV9** | 문서 뷰어(F5) 경로탈출·XSS 방어 규칙 |
+| **DW1~DW11** | 정의 편집(F7) 쓰기 안전 규칙 |
+| **D1~D8** | 프로젝트 경로(F3) 경로안전 규칙 |
+| **DS1~DS8** | 문서 소스(F9) 경로검증 규칙 |
+| **HR1~HR7 / HB1~HB8** | 하네스 컨텍스트(F10) 읽기(HR)·빌드(HB) 안전 규칙 |
+
+### 웹 UI 용어 확정 (코드 미노출 — 평이한 라벨만)
+`projectRoot`→**"프로젝트 경로"** · `계층 B`→**"효과성·활용도 지표"** · `관측 window`→**"관측 기간"** · `활성 run`→**"실행 중 작업"** · `정의 편집 게이트`→**"정의 편집 허용"** · `Docs 소스`→**"문서(산출물) 소스"** · `heuristic`→**"추정"** · `D4 규율`→**"산출물 관리 규율"**. (본 스펙 본문은 추적성 위해 코드 유지 — UI만 라벨 적용.)
+
 ## 0. v0.5 불변식 (깨면 안 되는 것 — 신기능 게이트)
 각 기능 설계는 이 목록 대비 "유지/델타"를 명시한다.
 - **I1 fire-and-observe:** 실행 = 배치 제출(Build/Agents) → supervisor spawn → Runs 관찰. 대화형 아님(§1·§3).

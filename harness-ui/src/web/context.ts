@@ -109,9 +109,9 @@ export function editDecision(
 
 // 읽기전용 사유(A128 배지 툴팁·색 비의존 텍스트). 서버 409 신호와 동형(codex/agy=v0.7 비대상·top file=읽기전용 컨텍스트).
 export function contextReadonlyReason(runtime: Runtime, path: string): string {
-  if (runtime === "codex") return "Codex 정의 편집은 v0.7 비대상입니다(읽기전용)";
-  if (runtime === "agy") return "agy 컨텍스트 편집은 v0.7 비대상입니다(읽기전용)";
-  if (runtime === "codex/agy") return "Codex/agy 공유 정의 편집은 v0.7 비대상입니다(읽기전용)";
+  if (runtime === "codex") return "Codex 정의 편집은 현재 지원하지 않습니다(읽기 전용)";
+  if (runtime === "agy") return "Antigravity 컨텍스트 편집은 현재 지원하지 않습니다(읽기 전용)";
+  if (runtime === "codex/agy") return "Codex/Antigravity 공유 정의 편집은 현재 지원하지 않습니다(읽기 전용)";
   // claude 인데 정의 파일이 아니거나 top file(CLAUDE.md)인 경우.
   if (contextEditTarget(path) === null) return "이 파일은 읽기전용 컨텍스트입니다";
   return "읽기전용 컨텍스트입니다";
@@ -120,9 +120,9 @@ export function contextReadonlyReason(runtime: Runtime, path: string): string {
 // ── 서버 error 코드 → 한국어 인라인(A128·조용한 드롭 금지) ──
 // PUT /api/context/edit(409): <runtime>-edit-v0.7·context-file-readonly·edit-via-f7 / 400 invalid-path·bad-input.
 export const CONTEXT_EDIT_ERRORS: Record<string, string> = {
-  "codex-edit-v0.7": "Codex 정의 편집은 v0.7 비대상입니다 · 읽기 전용으로 확인하세요.",
-  "codex/agy-edit-v0.7": "Codex/agy 공유 정의 편집은 v0.7 비대상입니다 · 읽기 전용으로 확인하세요.",
-  "agy-edit-v0.7": "agy 컨텍스트 편집은 v0.7 비대상입니다 · 읽기 전용으로 확인하세요.",
+  "codex-edit-v0.7": "Codex 정의 편집은 현재 지원하지 않습니다 · 읽기 전용으로 확인하세요.",
+  "codex/agy-edit-v0.7": "Codex/Antigravity 공유 정의 편집은 현재 지원하지 않습니다 · 읽기 전용으로 확인하세요.",
+  "agy-edit-v0.7": "Antigravity 컨텍스트 편집은 현재 지원하지 않습니다 · 읽기 전용으로 확인하세요.",
   "context-file-readonly": "이 컨텍스트 파일(CLAUDE/AGENTS/GEMINI.md)은 읽기 전용입니다 · UI 편집 대상이 아닙니다.",
   "edit-via-f7": "에이전트/스킬 정의는 정의 편집기에서 편집하세요.",
   "invalid-path": "경로가 유효하지 않습니다 · 화이트리스트 밖이거나 안전하지 않습니다.",

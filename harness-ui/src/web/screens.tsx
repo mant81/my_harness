@@ -89,7 +89,7 @@ function CoverageNote({ cov }: { cov: Coverage }) {
     <div className="coverage-note" role="note">
       <span className="muted">ⓘ {coverageSummary(cov)}{win && ` · 기간 ${win}`}
         {cov.recordedAtSource === "mtime" && (
-          <span title="birthtime 미지원 파일시스템 — mtime 기준(관측 window 정렬 비결정 가능)"> · mtime 기준</span>
+          <span title="일부 파일시스템은 생성시각을 지원하지 않아 수정시각 기준으로 정렬됩니다 — 정렬·기간이 정확하지 않을 수 있음"> · mtime 기준</span>
         )}
       </span>
       {trunc && <span className="banner warn" role="note">⚠ {trunc}</span>}
@@ -132,7 +132,7 @@ function EffectivenessCard() {
   const path = useMemo(() => metricsPath("/api/metrics/overview", win, Date.now()), [win]);
   const m = useApi<OverviewMetrics>(path);
   return (
-    <Card title="효과성 지표 (F6 · 계층 B · 관측 파생)">
+    <Card title="효과성 지표 (실행 관측 기반)">
       <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => <OverviewMetricsBody m={d} />}</Async>
     </Card>
@@ -158,7 +158,7 @@ function OverviewMetricsBody({ m }: { m: OverviewMetrics }) {
       )}
       {/* 계층 B 상세 접기(A91 과밀 방지) */}
       <details className="tier-b">
-        <summary>상세 지표 (계층 B · 신뢰도 배지 동반)</summary>
+        <summary>상세 지표 (신뢰도 배지 동반)</summary>
         <Table cols={["지표", "값", "산정 근거"]} rows={[
           ["성공률", <MetricCell mv={m.successRate} fmt="percent" />, "status.state 직접 관측"],
           ["실패율", <MetricCell mv={m.failureRate} fmt="percent" />, "status.state 직접 관측"],
@@ -179,7 +179,7 @@ function AgentsUsage() {
   const path = useMemo(() => metricsPath("/api/metrics/agents", win, Date.now()), [win]);
   const m = useApi<AgentsMetrics>(path);
   return (
-    <Card title="활용도 (F6 · 관측 window)">
+    <Card title="활용도 (선택 기간 관측)">
       <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => (
         <>
@@ -207,7 +207,7 @@ function SkillsUsage() {
   const path = useMemo(() => metricsPath("/api/metrics/skills", win, Date.now()), [win]);
   const m = useApi<SkillsMetrics>(path);
   return (
-    <Card title="활용도 (F6 · 관측 window)">
+    <Card title="활용도 (선택 기간 관측)">
       <MetricsWindowBar win={win} onChange={setWin} />
       <Async state={m}>{(d) => (
         <>
@@ -241,14 +241,14 @@ export function Overview() {
       {/* F6 W2: 효과성 카드는 자체 metrics/overview 페치로 독립 로딩(W9/A83 — 실패해도 아래 카드 미붕괴) */}
       <EffectivenessCard />
       <Async state={rt}>{(r) => (
-        <Card title="런타임 (A2)">
+        <Card title="런타임">
           <Table cols={["런타임", "설치", "버전"]} rows={Object.entries(r).map(([k, v]) => [
             k, v.installed ? <Badge kind="ok">설치됨</Badge> : <Badge kind="muted">없음</Badge>, v.version ?? "—",
           ])} />
         </Card>
       )}</Async>
       <Async state={inv}>{(v) => (
-        <Card title="인벤토리 (A3)">
+        <Card title="인벤토리">
           <Table cols={["런타임", "진입점", "에이전트", "스킬"]} rows={[
             ["claude", v.claude.entrypoint ?? <Badge kind="warn">없음</Badge>, v.claude.agents, v.claude.skills],
             ["codex", v.codex.entrypoint ?? <Badge kind="muted">없음</Badge>, v.codex.agents, v.codex.skills],
@@ -258,7 +258,7 @@ export function Overview() {
       )}</Async>
       <Async state={st}>{(s) => (
         <>
-          <Card title="구성 건강도 (A35 · heuristic)">
+          <Card title="구성 건강도 (추정)">
             <Table cols={["항목", "값"]} rows={[
               ["오케스트레이터", s.configHealth.orchestratorPresent ? <Badge kind="ok">있음</Badge> : <Badge kind="warn">없음</Badge>],
               ["CLAUDE.md / AGENTS.md", <>{s.configHealth.claudePointer ? "✓" : "✗"} / {s.configHealth.agentsPointer ? "✓" : "✗"}</>],
@@ -267,7 +267,7 @@ export function Overview() {
               ["커버리지 신뢰도", s.configHealth.coverageConfidence],
             ]} />
           </Card>
-          <Card title="D4 규율 (A36) · 업데이트 (A37)">
+          <Card title="산출물 관리 규율 · 업데이트 상태">
             <Table cols={["프로젝트", "결과서", "다음단계 누락"]} rows={s.d4.projects.map((p) => [
               // A59: 결과서(docs/) 클릭 → Docs 뷰어 진입
               <a className="link" href="#/docs" title="Docs 뷰어에서 결과서 열람">{p.project}</a>,
@@ -275,7 +275,7 @@ export function Overview() {
             ])} />
             <p className="muted">_workspace 방치: {s.d4.workspaceAbandoned} · manifest: {String(s.update.manifest)} · factoryDrift: {s.update.factoryDrift} · <a className="link" href="#/docs">문서 뷰어 열기 →</a></p>
           </Card>
-          <Card title="진화 이력 (A38)">
+          <Card title="진화 이력">
             <Table cols={["날짜", "변경", "출처"]} rows={s.evolution.slice(-12).reverse().map((e) => [e.date, e.change, e.source])} />
           </Card>
         </>
@@ -310,7 +310,7 @@ export function Build() {
   return (
     <div className="screen">
       <h2>Build</h2>
-      <Card title="실행 요청 (A9a · dry-run 기본)">
+      <Card title="실행 요청 (미리보기 기본)">
         <div className="form">
           <label>런타임<select value={runtime} onChange={(e) => setRuntime(e.target.value as "codex" | "claude")}><option value="codex">codex</option><option value="claude">claude</option></select></label>
           <label>모드<input value={mode} onChange={(e) => setMode(e.target.value)} maxLength={40} /></label>
@@ -361,7 +361,7 @@ export function Agents() {
                 <button className="primary" onClick={() => setRunFor(a.name)}>이 에이전트에게 요청 (New Run)</button>
                 {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex → 비활성 + 이유 툴팁 + Settings 딥링크) */}
                 <EditButton
-                  reason={!gateOn ? "정의 편집이 비활성입니다" : a.runtime !== "claude" ? "codex 에이전트 정의 편집은 v0.7 비대상입니다" : null}
+                  reason={!gateOn ? "정의 편집이 비활성입니다" : a.runtime !== "claude" ? "Codex 에이전트 정의 편집은 현재 지원하지 않습니다" : null}
                   showSettingsLink={!gateOn}
                   onEdit={() => setEditFor(a.name)}
                 />
@@ -527,7 +527,7 @@ export function Skills() {
               <div className="detail-actions">
                 {/* F7 A80/A81: 정의 편집 진입(게이트 off·codex-only → 비활성 + 이유 툴팁 + Settings 딥링크) */}
                 <EditButton
-                  reason={!gateOn ? "정의 편집이 비활성입니다" : !skillHasClaudePath(s.runtimePaths) ? "codex 전용 스킬 정의 편집은 v0.7 비대상입니다" : null}
+                  reason={!gateOn ? "정의 편집이 비활성입니다" : !skillHasClaudePath(s.runtimePaths) ? "Codex 전용 스킬 정의 편집은 현재 지원하지 않습니다" : null}
                   showSettingsLink={!gateOn}
                   onEdit={() => setEditFor(s.name)}
                 />
@@ -753,7 +753,7 @@ function DefinitionEditor({ kind, name, onClose }: { kind: DefKind; name: string
               <p>✓ 저장됨 · 이전 해시 <code className="path">{saveResult.prevHash.slice(0, 12)}</code> → 새 해시 <code className="path">{saveResult.newHash.slice(0, 12)}</code></p>
               <p className="muted">이 저장은 정의 파일 기록만 합니다(실행 아님) — 실행하려면 <b>New Run / Ask Agent</b> 로 진행하세요.</p>
               {saveResult.codexDriftWarning && (
-                <p className="warn-text">⚠ Codex 듀얼(.codex/.agents) 피어는 자동 갱신되지 않습니다 — drift 발생 가능(v0.7 비대상).</p>
+                <p className="warn-text">⚠ Codex 병행 정의(.codex/.agents)는 자동 갱신되지 않습니다 — 불일치 발생 가능.</p>
               )}
               <button disabled={rbBusy} onClick={doRollback}>{rbBusy ? "되돌리는 중…" : "↩ 되돌리기 (직전 백업 복원)"}</button>
             </div>
@@ -917,7 +917,7 @@ function ResultBar({ data, onPage }: { data: RunsQueryResult; onPage: (offset: n
           </span>
         )}
         {data.recordedAtSource === "mtime" && (
-          <span className="src-note muted" title="birthtime 미지원 파일시스템 — mtime(최근 상태갱신) 기준. 정렬·기간이 비결정적일 수 있음.">
+          <span className="src-note muted" title="일부 파일시스템은 생성시각 미지원 — 최근 상태갱신 시각 기준. 정렬·기간이 정확하지 않을 수 있음.">
             ⓘ 기록 시각 = mtime(정렬 비결정 가능)
           </span>
         )}
@@ -1371,14 +1371,14 @@ function SettingsBody({ info, onSaved }: { info: SettingsInfo; onSaved: () => vo
         <Table cols={["항목", "값"]} rows={[
           ["projectRoot (현재 유효값)", <code className="path">{info.projectRoot}</code>],
           ["projectsHome (경계)", info.projectsHome ? <code className="path">{info.projectsHome}</code> : <Badge kind="warn">미설정</Badge>],
-          ["정의 편집(F7)", info.definitionEditEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성</Badge>],
+          ["정의 편집", info.definitionEditEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성</Badge>],
           ["파일수정 API", info.mutationEnabled ? <Badge kind="warn">활성</Badge> : <Badge kind="ok">비활성(조회 전용)</Badge>],
         ]} />
       </Card>
 
       {/* W-D/A97: 미프로비저닝 → 편집 폼 비활성 + 정확한 프로비저닝 액션(데드엔드 방지) */}
       {!provisioned ? (
-        <Card title="projectRoot 편집 (사용 불가)">
+        <Card title="프로젝트 경로 편집 (사용 불가)">
           <div className="banner warn" role="note">
             <p>⚠ 프로젝트 경계가 아직 프로비저닝되지 않았습니다.</p>
             <p className="muted">
@@ -1395,7 +1395,7 @@ function SettingsBody({ info, onSaved }: { info: SettingsInfo; onSaved: () => vo
           </fieldset>
         </Card>
       ) : (
-        <Card title="projectRoot 편집 (A71 · 재시작 후 반영)">
+        <Card title="프로젝트 경로 편집 (재시작 후 반영)">
           <div className="form">
             <label className="full">새 프로젝트 루트 경로 (절대경로)
               <input value={path} onChange={(e) => { setPath(e.target.value); setErr(null); }}
@@ -1467,7 +1467,7 @@ function ProjectRootConfirm({ path, preview, onCancel, onSaved }: {
       {/* W-B1/A99: activeRunsWarning>0 일 때만 2선택 명시(과경고 금지) */}
       {requiresOrphanChoice(warn) && (
         <fieldset className="form" style={{ marginTop: 12 }}>
-          <legend>활성 run 처리 (A99 · 명시 선택 필요)</legend>
+          <legend>실행 중 작업 처리 (선택 필요)</legend>
           <label className="check">
             <input type="radio" name="orphan" checked={choice === "cancel-first"}
               onChange={() => setChoice("cancel-first")} />
@@ -1512,7 +1512,7 @@ function DefinitionEditToggle({ enabled, onSaved }: { enabled: boolean; onSaved:
   };
 
   return (
-    <Card title="정의 편집 게이트 (F7 · A78 · 고위험)">
+    <Card title="정의 편집 허용 (고위험)">
       <p className="muted">
         {enabled ? <><Badge kind="warn">활성</Badge> 에이전트/스킬 정의 파일(.claude) 편집이 허용됩니다.</>
                  : <><Badge kind="ok">비활성</Badge> 편집기는 뷰어 전용입니다(파일 쓰기 불가).</>}
@@ -1549,7 +1549,7 @@ function DefinitionEditToggle({ enabled, onSaved }: { enabled: boolean; onSaved:
 export function DocsSourcesEditor() {
   const st = useApi<DocsSourcesList>("/api/docs/sources");
   return (
-    <Card title="Docs 소스 (F9 · A118/A119)">
+    <Card title="문서(산출물) 소스">
       <Async state={st}>{(p) => <DocsSourcesForm initial={p} onSaved={st.reload} />}</Async>
     </Card>
   );
@@ -1706,10 +1706,10 @@ export function Eval() {
   const [loop, setLoop] = useState<string | null>(null);
   return (
     <div className="screen">
-      <h2>Eval <span className="ver">F8 · 자기평가</span></h2>
+      <h2>Eval <span className="ver">자기평가</span></h2>
       <p className="muted">
-        self-eval scorecard 관측·자기개선 제안(사람 승인만)·지표관리. <b>alignment_score 는 정합도이지 품질이 아닙니다</b> ·
-        제안은 <b>자동 적용되지 않습니다</b>(F7 편집기에서 수동 검토·저장).
+        자기평가 기록 보기 · 자기개선 제안(사람 승인만) · 평가지표 설정. <b>이 점수는 "정합도"이며 품질 점수가 아닙니다</b> ·
+        제안은 <b>자동 적용되지 않습니다</b>(정의 편집기에서 수동 검토·저장).
       </p>
       <Async state={idx}>{(d) => <EvalIndexBody idx={d} loop={loop} onLoop={setLoop} />}</Async>
     </div>
@@ -1730,7 +1730,7 @@ function EvalIndexBody({ idx, loop, onLoop }: { idx: EvalsIndex; loop: string | 
         </Card>
       )}
       {!empty && (
-        <Card title="평가 루프 (Part A · 읽기전용)">
+        <Card title="평가 결과 보기 (읽기 전용)">
           {idx.truncated && <p className="banner warn" role="note">✂ 루프 스캔 절단(상한 도달) · 일부만 표시</p>}
           <Table cols={["루프", "run 수(열거)", "최근 정합도", "최근 종료사유"]} rows={idx.loops.map((l) => [
             <button className="link" onClick={() => onLoop(l.loop)}>{l.loop}</button>,
@@ -1757,7 +1757,7 @@ function LoopTrendCard({ loop, onClose }: { loop: string; onClose: () => void })
   const st = useApi<LoopTrend>(`/api/evals/${encodeURIComponent(loop)}`);
   const [sel, setSel] = useState<{ stage: string; run: string } | null>(null);
   return (
-    <Card title={`추세 · ${loop} (Part A)`}>
+    <Card title={`추세 · ${loop}`}>
       <button className="link" onClick={onClose}>✕ 닫기</button>
       <Async state={st}>{(d) => !d.found || d.series.length === 0 ? (
         <div className="empty" role="status">
@@ -1768,11 +1768,11 @@ function LoopTrendCard({ loop, onClose }: { loop: string; onClose: () => void })
         <>
           <AlignmentBadgeLegend formula={d.labels.alignmentFormula} />
           <p className="muted">
-            추세 소스: {d.trendSource}(in-process 재계산 · 암호 rollup 아님 → <b>미검증 표시</b>) ·
+            추세 소스: {d.trendSource}(화면 내 재계산 · 검증된 원장 아님 → <b>미검증 표시</b>) ·
             유효 {d.counts.valid} / 미측정 {d.counts.unavailable} / 격리 {d.counts.corrupt}
             {d.truncated && " · ✂ 절단(일부만)"}
           </p>
-          <Table cols={["기록 시각", "stage/run", "정합도", "rounds_norm", "overturned(GT)", "verdicts", "종료사유", "품질(LLM 해석)", "검증"]}
+          <Table cols={["기록 시각", "단계/실행", "정합도", "라운드(정규화)", "번복률", "판정 수", "종료 사유", "품질(참고)", "검증"]}
             rows={d.series.map((p) => [
               fmtMs(p.recordedAtMs),
               <button className="link" onClick={() => setSel({ stage: p.stageId, run: p.runId })}>{p.stageId}/{p.runId.slice(0, 16)}</button>,
@@ -1813,23 +1813,23 @@ function ScorecardDetailCard({ loop, stage, run, onClose }: { loop: string; stag
             <AlignmentBadgeLegend formula={d.labels.alignmentFormula} />
             <Table cols={["항목", "값"]} rows={[
               ["정합도(품질 아님)", <span title={d.labels.alignmentFormula}>{alignmentText(c.alignment_score ?? null)}</span>],
-              ["rounds / rounds_normalized", <>{numOrDash(c.rounds ?? null)} / {numOrDash(c.rounds_normalized ?? null)}</>],
+              ["라운드 / 정규화 라운드", <>{numOrDash(c.rounds ?? null)} / {numOrDash(c.rounds_normalized ?? null)}</>],
               ["verdict_counts", verdictCountsText(c.verdict_counts ? { confirmed: c.verdict_counts.confirmed ?? 0, partial: c.verdict_counts.partial ?? 0, deferred: c.verdict_counts.deferred ?? 0, rejected: c.verdict_counts.rejected ?? 0, duplicate: c.verdict_counts.duplicate ?? 0 } : null)],
               ["missed_defect_rate", <span className="muted" title={d.labels.missedDefectRate}>{gtMetricText(c.missed_defect_rate ?? null)}</span>],
-              ["overturned_rejection_rate", <span className="muted" title={d.labels.overturnedRejectionRate}>{gtMetricText(c.overturned_rejection_rate ?? null)}</span>],
+              ["기각 번복률", <span className="muted" title={d.labels.overturnedRejectionRate}>{gtMetricText(c.overturned_rejection_rate ?? null)}</span>],
               ["quality_label(LLM 해석)", c.quality_label ? <span title={d.labels.qualityLabel}>{c.quality_label} <Badge kind="muted">LLM 해석</Badge></span> : <span className="muted">—</span>],
               ["computed_by", c.computed_by ?? <span className="muted">—</span>],
             ]} />
             {/* 종료사유·경고 = 반신뢰 _workspace 자유 텍스트 → DV8 sanitize(지시 흡수/스크립트 무력화) */}
             {c.termination_reason && (
               <div className="scorecard-block">
-                <p className="muted">종료 사유 (데이터 · DV8 sanitize):</p>
+                <p className="muted">종료 사유 (안전 처리됨):</p>
                 <SafeMd text={c.termination_reason} />
               </div>
             )}
             {Array.isArray(c.warnings) && c.warnings.length > 0 && (
               <div className="scorecard-block">
-                <p className="muted">⚠ 경고 (scorecard 데이터 · DV8 sanitize · 지시로 해석하지 않음):</p>
+                <p className="muted">⚠ 경고 (기록 데이터 · 안전 처리됨 · 지시로 해석하지 않음):</p>
                 {c.warnings.map((w, i) => <SafeMd key={i} text={w} />)}
               </div>
             )}
@@ -1844,7 +1844,7 @@ function ScorecardDetailCard({ loop, stage, run, onClose }: { loop: string; stag
 function ProposalCard({ loop }: { loop: string }) {
   const st = useApi<EvalProposal>(`/api/evals/${encodeURIComponent(loop)}/proposal`);
   return (
-    <Card title={`자기개선 제안 · ${loop} (Part B · 사람 승인만)`}>
+    <Card title={`자기개선 제안 · ${loop} (사람 승인만)`}>
       <Async state={st}>{(p) => (
         <>
           {/* 어느 상태든 유지되는 교리 배너: 자동 적용 없음·미적용 */}
@@ -1856,7 +1856,7 @@ function ProposalCard({ loop }: { loop: string }) {
             <div className="empty" role="status">
               <p className="muted">🚫 {proposalDisabledText(p)}</p>
               {p.disabledReason === "adoption-stage-below-3" && (
-                <p className="muted">아래 <b>지표관리(Part C)</b>에서 채택 단계를 3(experimental)으로 올리세요.</p>
+                <p className="muted">아래 <b>평가지표 설정</b>에서 채택 단계를 3(실험 단계)으로 올리세요.</p>
               )}
               {p.gate && p.disabledReason === "insufficient-data" && <GateTable gate={p.gate} />}
             </div>
@@ -1890,7 +1890,7 @@ function ProposalCard({ loop }: { loop: string }) {
               )}
               {/* 인용 scorecard */}
               {p.citedScorecards.length > 0 && (
-                <Table cols={["stage/run", "정합도", "검증"]} rows={p.citedScorecards.map((c) => [
+                <Table cols={["단계/실행", "정합도", "검증"]} rows={p.citedScorecards.map((c) => [
                   `${c.stageId}/${c.runId.slice(0, 16)}`,
                   <span title={p.labels.alignmentFormula}>{alignmentText(c.alignmentScore)}</span>,
                   <VerifiedBadge verified={c.verified} />,
@@ -1898,7 +1898,7 @@ function ProposalCard({ loop }: { loop: string }) {
               )}
               {/* A112/A105 CTA — "승인"이 아니라 "편집기에서 검토·저장"(수동·F7) */}
               <div className="detail-actions">
-                <a className="primary link" href="#/agents">✎ 편집기에서 검토·저장 (F7 · 수동)</a>
+                <a className="primary link" href="#/agents">✎ 편집기에서 검토·저장 (수동)</a>
               </div>
               <p className="muted">※ 평가기준·에이전트 tools/skills·역할·게이트 변경은 <b>항상 사람 승인</b>입니다. 여기서 자동 반영되는 것은 없습니다.</p>
             </>
@@ -1931,7 +1931,7 @@ function GateTable({ gate }: { gate: EvalProposal["gate"] }) {
 function EvalsConfigCard() {
   const st = useApi<EvalsConfigResolved>("/api/evals/config");
   return (
-    <Card title="지표관리 (Part C · 설정 쓰기)">
+    <Card title="평가지표 설정">
       {/* 정합: adoptionStage 4 = display-only 잠금 → 폼 편집 비활성(쓰기 경로 없음·교리). 1~3 만 편집 폼. */}
       <Async state={st}>{(cfg) => cfg.adoptionStage === 4
         ? <LockedConfigView key="locked" cfg={cfg} />
@@ -1944,7 +1944,7 @@ function EvalsConfigCard() {
 function LockedConfigView({ cfg }: { cfg: EvalsConfigResolved }) {
   return (
     <div className="locked-config">
-      <p className="banner full" role="note">🔒 채택 단계 <b>4(잠금·display-only)</b> — 설정은 읽기 전용입니다. UI 에 쓰기 경로가 없습니다(교리).</p>
+      <p className="banner full" role="note">🔒 채택 단계 <b>4(잠금·표시 전용)</b> — 설정은 읽기 전용입니다. UI에 쓰기 경로가 없습니다.</p>
       <p className="muted">현재 저장값: {adoptionStageLabel(cfg.adoptionStage)} · 제안 활성: {cfg.proposalsEnabled ? "예" : "아니오"}</p>
       <Table cols={["지표", "활성", "가중치"]} rows={Object.entries(cfg.metrics).map(([k, m]) => [
         k, m.enabled ? <Badge kind="ok">on</Badge> : <Badge kind="muted">off</Badge>, m.weight,
@@ -2020,10 +2020,10 @@ function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: 
         </label>
         <p className="muted full">현재 저장값: {adoptionStageLabel(cfg.adoptionStage)} · 제안 활성: {cfg.proposalsEnabled ? "예(단계≥3)" : "아니오"}</p>
         {stage === 3 && cfg.adoptionStage < 3 && (
-          <p className="banner warn full" role="note">🧪 단계 3 은 <b>experimental</b>(제안 생성 활성) — 저장 시 고위험 확인이 필요합니다.</p>
+          <p className="banner warn full" role="note">🧪 단계 3 은 <b>실험 단계</b>(제안 생성 활성) — 저장 시 고위험 확인이 필요합니다.</p>
         )}
         {/* A108: 단계4 = display-only 잠금(쓰기 경로 없음) */}
-        <p className="banner full" role="note">🔒 단계 4(잠금·display-only)는 UI 에서 설정할 수 없습니다 — 쓰기 경로가 없습니다(교리).</p>
+        <p className="banner full" role="note">🔒 단계 4(잠금·표시 전용)는 UI에서 설정할 수 없습니다 — 쓰기 경로가 없습니다.</p>
       </div>
 
       {/* per-metric enable/weight */}
@@ -2085,12 +2085,12 @@ function EvalsConfigForm({ cfg, onSaved }: { cfg: EvalsConfigResolved; onSaved: 
 
       {/* A111/A85: 단계3 전환 고위험 확인 다이얼로그 */}
       {confirmOpen && (
-        <ConfirmDialog title="채택 단계 3 전환 확인 (고위험 · experimental)" onCancel={() => setConfirmOpen(false)}>
+        <ConfirmDialog title="채택 단계 3 전환 확인 (고위험 · 실험 단계)" onCancel={() => setConfirmOpen(false)}>
           <p className="muted">
-            채택 단계 <b>3(experimental)</b>으로 올리면 자기개선 <b>제안 생성이 활성화</b>됩니다.
+            채택 단계 <b>3(실험 단계)</b>으로 올리면 자기개선 <b>제안 생성이 활성화</b>됩니다.
             제안은 <b>정보성</b>이며 <b>자동 적용되지 않습니다</b>(F7 편집기 수동 검토·저장·사람 승인 backstop).
           </p>
-          <p className="warn-text">⚠ alignment_score 는 정합도이지 품질 보증이 아닙니다. 제안은 추세 기반 후보이지 확정이 아닙니다.</p>
+          <p className="warn-text">⚠ 이 점수는 "정합도"이며 품질 보증이 아닙니다. 제안은 추세 기반 후보이지 확정이 아닙니다.</p>
           {err && <p className="banner err" role="alert">⚠ {err}</p>}
           <div className="modal-actions">
             <button onClick={() => setConfirmOpen(false)} disabled={busy}>취소 (변경 없음)</button>
@@ -2115,7 +2115,7 @@ export function Context() {
       <h2>Context</h2>
       <p className="muted">
         멀티런타임 하네스 컨텍스트(읽기 전용) + 신규 정의 빌더. 편집은 Claude 정의(<code>.claude/agents·skills</code>)만 가능하며,
-        Codex/agy·CLAUDE/AGENTS/GEMINI.md 는 v0.7 비대상(읽기 전용)입니다.
+        Codex·Antigravity 정의와 CLAUDE.md·AGENTS.md·GEMINI.md 는 현재 편집을 지원하지 않습니다(읽기 전용).
       </p>
       {/* A83: 트리는 자체 3-state. 빌더는 트리 로드 실패·빈 상태와 무관하게 항상 표시(A128) */}
       <Async state={tree}>{(t) => <ContextBrowser tree={t} gateOn={gateOn} onChanged={tree.reload} />}</Async>
@@ -2231,7 +2231,7 @@ function ContextFilePanel({ rel, node, gateOn, projectRoot, onEdit }: {
     <Card title={rel}>
       <div className="ctx-file-actions detail-actions">
         {decision.editable
-          ? <button className="primary edit-btn" onClick={() => onEdit(decision.kind, decision.name)}>✎ 정의 편집 (F7)</button>
+          ? <button className="primary edit-btn" onClick={() => onEdit(decision.kind, decision.name)}>✎ 정의 편집</button>
           : <span className="muted edit-reason" role="note" title={decision.reason}>🔒 {decision.reason}
               {!gateOn && <> · <a className="link" href="#/settings">Settings에서 켜기 →</a></>}
             </span>}

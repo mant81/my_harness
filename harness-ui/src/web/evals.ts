@@ -227,7 +227,7 @@ export function evalsEmptyState(idx: { evalsAvailable: boolean; loops: unknown[]
 export function proposalDisabledText(p: Pick<EvalProposal, "disabledReason" | "gate">): string {
   switch (p.disabledReason) {
     case "adoption-stage-below-3":
-      return "제안 비활성 — 채택 단계가 3(실험) 미만입니다. 아래 지표관리에서 단계를 3으로 올려야 제안이 활성화됩니다(experimental·자동 적용 없음).";
+      return "제안 비활성 — 채택 단계가 3(실험 단계) 미만입니다. 아래 평가지표 설정에서 단계를 3으로 올려야 제안이 활성화됩니다(실험 단계·자동 적용 없음).";
     case "insufficient-data": {
       const short = p.gate ? gateShortfalls(p.gate) : [];
       const tail = short.length ? ` — ${short.join(" · ")}` : "";
@@ -301,8 +301,8 @@ export function adoptionStageLabel(stage: number): string {
   switch (stage) {
     case 1: return "단계 1 — 측정만 (제안 비활성·보수적 기본)";
     case 2: return "단계 2 — 관측 심화 (제안 준비·아직 비활성)";
-    case 3: return "단계 3 — 제안 활성 (experimental · 자동 적용 없음)";
-    case 4: return "단계 4 — 잠금 (display-only · 쓰기 불가)";
+    case 3: return "단계 3 — 제안 활성 (실험 단계 · 자동 적용 없음)";
+    case 4: return "단계 4 — 잠금 (표시 전용 · 쓰기 불가)";
     default: return `단계 ${stage}`;
   }
 }

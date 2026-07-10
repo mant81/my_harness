@@ -169,7 +169,7 @@ describe("단계 전환·라벨(A108/A111)", () => {
     expect(stageNeedsHighRiskConfirm(1, 2)).toBe(false);
   });
   it("adoptionStageLabel: 4 는 잠금(display-only) 문구", () => {
-    expect(adoptionStageLabel(3)).toContain("experimental");
+    expect(adoptionStageLabel(3)).toContain("실험 단계");
     expect(adoptionStageLabel(4)).toContain("잠금");
   });
 });

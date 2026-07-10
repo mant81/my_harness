@@ -123,7 +123,7 @@ describe("editDecision — 편집 활성 계약(runtime==claude && 정의경로 
     expect(editDecision({ runtime: "claude", path: ".claude/skills/alpha/SKILL.md", type: "file" }, true))
       .toEqual({ editable: true, kind: "skill", name: "alpha" });
   });
-  it("게이트 on 이어도 codex/agy/codex-agy → 비활성(v0.7 비대상)", () => {
+  it("게이트 on 이어도 codex/agy/codex-agy → 비활성(현재 미지원)", () => {
     for (const rt of ["codex", "agy", "codex/agy"] as Runtime[]) {
       const d = editDecision({ runtime: rt, path: ".codex/agents/cx.toml", type: "file" }, true);
       expect(d.editable).toBe(false);
@@ -139,10 +139,10 @@ describe("editDecision — 편집 활성 계약(runtime==claude && 정의경로 
 });
 
 describe("contextReadonlyReason — 읽기전용 사유(색 비의존 텍스트·서버 409 신호 동형)", () => {
-  it("런타임별 v0.7 비대상 문구", () => {
-    expect(contextReadonlyReason("codex", ".codex/agents/cx.toml")).toContain("v0.7");
-    expect(contextReadonlyReason("agy", "GEMINI.md")).toContain("v0.7");
-    expect(contextReadonlyReason("codex/agy", ".agents/skills/beta/SKILL.md")).toContain("v0.7");
+  it("런타임별 읽기전용(현재 미지원) 문구", () => {
+    expect(contextReadonlyReason("codex", ".codex/agents/cx.toml")).toContain("지원하지 않습니다");
+    expect(contextReadonlyReason("agy", "GEMINI.md")).toContain("지원하지 않습니다");
+    expect(contextReadonlyReason("codex/agy", ".agents/skills/beta/SKILL.md")).toContain("지원하지 않습니다");
   });
   it("claude top file → 읽기전용 컨텍스트", () => {
     expect(contextReadonlyReason("claude", "CLAUDE.md")).toContain("읽기전용");
