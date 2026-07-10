@@ -1693,7 +1693,7 @@ function AlignmentBadgeLegend({ formula }: { formula: string }) {
 function VerifiedBadge({ verified, reason }: { verified: boolean; reason?: string | null }) {
   return verified
     ? <Badge kind="ok">✓ 검증됨</Badge>
-    : <span title={reason ?? "재도출 불일치/불가"}><Badge kind="warn">⚠ 미검증</Badge></span>;
+    : <span title={reason ?? "검증 실패 또는 불가"}><Badge kind="warn">⚠ 미검증</Badge></span>;
 }
 
 // scorecard 자유 텍스트 = 데이터(지시 흡수 금지). DV8 파이프라인(markdown-it html:false + DOMPurify)만 통과분 주입.
@@ -1740,7 +1740,7 @@ function EvalIndexBody({ idx, loop, onLoop }: { idx: EvalsIndex; loop: string | 
               ? <span title={l.latest.terminationReason}>{terminationExcerpt(l.latest.terminationReason) || "—"}</span>
               : <span className="muted">—</span>,
           ])} />
-          <p className="muted">🕳 미측정(unavailable)·격리(corrupt) 세부는 루프를 열어 추세의 <b>유효/미측정/격리</b> 카운트에서 확인하세요(인덱스는 최신 1건만 읽어 OOM 방어).</p>
+          <p className="muted">🕳 '미측정'·'손상' 항목의 세부는 해당 루프를 열어 추세의 <b>유효 / 미측정 / 손상</b> 개수에서 확인하세요. (목록은 최신 1건만 읽어 메모리를 아낍니다.)</p>
           <p className="muted">{idx.note}</p>
         </Card>
       )}
@@ -1768,8 +1768,8 @@ function LoopTrendCard({ loop, onClose }: { loop: string; onClose: () => void })
         <>
           <AlignmentBadgeLegend formula={d.labels.alignmentFormula} />
           <p className="muted">
-            추세 소스: {d.trendSource}(화면 내 재계산 · 검증된 원장 아님 → <b>미검증 표시</b>) ·
-            유효 {d.counts.valid} / 미측정 {d.counts.unavailable} / 격리 {d.counts.corrupt}
+            추세 소스: {d.trendSource === "scorecards-inprocess" ? "화면 내 재계산" : d.trendSource}(검증된 원장 아님 → <b>미검증 표시</b>) ·
+            유효 {d.counts.valid} / 미측정 {d.counts.unavailable} / 손상 {d.counts.corrupt}
             {d.truncated && " · ✂ 절단(일부만)"}
           </p>
           <Table cols={["기록 시각", "단계/실행", "정합도", "라운드(정규화)", "번복률", "판정 수", "종료 사유", "품질(참고)", "검증"]}
@@ -1799,11 +1799,11 @@ function LoopTrendCard({ loop, onClose }: { loop: string; onClose: () => void })
 function ScorecardDetailCard({ loop, stage, run, onClose }: { loop: string; stage: string; run: string; onClose: () => void }) {
   const st = useApi<ScorecardDetail>(`/api/evals/${encodeURIComponent(loop)}/${encodeURIComponent(stage)}/${encodeURIComponent(run)}`);
   return (
-    <Card title={`scorecard · ${stage}/${run.slice(0, 24)}`}>
+    <Card title={`평가 기록 · ${stage}/${run.slice(0, 24)}`}>
       <button className="link" onClick={onClose}>✕ 닫기</button>
       <Async state={st}>{(d) => {
         if (d.status !== "ok" || !d.scorecard) {
-          const label = d.status === "unavailable" ? "미측정(eval-unavailable · 고장 아님)" : d.status === "corrupt" ? "격리(무결성 위반/손상)" : "찾을 수 없음";
+          const label = d.status === "unavailable" ? "미측정 (아직 측정 안 됨 · 고장 아님)" : d.status === "corrupt" ? "손상 (기록 무결성 위반)" : "찾을 수 없음";
           return <div className="empty" role="status"><p className="muted">⛔ {label}{d.reason && <> · {d.reason}</>}</p></div>;
         }
         const c = d.scorecard;
@@ -1814,7 +1814,7 @@ function ScorecardDetailCard({ loop, stage, run, onClose }: { loop: string; stag
             <Table cols={["항목", "값"]} rows={[
               ["정합도(품질 아님)", <span title={d.labels.alignmentFormula}>{alignmentText(c.alignment_score ?? null)}</span>],
               ["라운드 / 정규화 라운드", <>{numOrDash(c.rounds ?? null)} / {numOrDash(c.rounds_normalized ?? null)}</>],
-              ["verdict_counts", verdictCountsText(c.verdict_counts ? { confirmed: c.verdict_counts.confirmed ?? 0, partial: c.verdict_counts.partial ?? 0, deferred: c.verdict_counts.deferred ?? 0, rejected: c.verdict_counts.rejected ?? 0, duplicate: c.verdict_counts.duplicate ?? 0 } : null)],
+              ["판정 건수", verdictCountsText(c.verdict_counts ? { confirmed: c.verdict_counts.confirmed ?? 0, partial: c.verdict_counts.partial ?? 0, deferred: c.verdict_counts.deferred ?? 0, rejected: c.verdict_counts.rejected ?? 0, duplicate: c.verdict_counts.duplicate ?? 0 } : null)],
               ["missed_defect_rate", <span className="muted" title={d.labels.missedDefectRate}>{gtMetricText(c.missed_defect_rate ?? null)}</span>],
               ["기각 번복률", <span className="muted" title={d.labels.overturnedRejectionRate}>{gtMetricText(c.overturned_rejection_rate ?? null)}</span>],
               ["quality_label(LLM 해석)", c.quality_label ? <span title={d.labels.qualityLabel}>{c.quality_label} <Badge kind="muted">LLM 해석</Badge></span> : <span className="muted">—</span>],
@@ -1877,9 +1877,9 @@ function ProposalCard({ loop }: { loop: string }) {
               {/* provenance(소스경로·runId·computedBy·표본수·검증상태) */}
               {p.provenance && (
                 <details className="provenance">
-                  <summary>근거 출처 (provenance · 소스·표본·검증)</summary>
+                  <summary>근거 출처 (소스·표본·검증)</summary>
                   <Table cols={["항목", "값"]} rows={[
-                    ["computedBy", p.provenance.computedBy],
+                    ["계산 방법", p.provenance.computedBy],
                     ["표본 수", p.provenance.sampleSize],
                     ["검증 상태", p.provenance.verificationStatus],
                     ["runIds", p.provenance.runIds.join(", ") || "—"],

@@ -46,7 +46,7 @@ describe("F8 API — Part A/B/C (M13·축소안)", () => {
     const b = r.json();
     expect(b.loops[0].loop).toBe("external-review");
     expect(b.labels.alignmentScore).toContain("정합도");
-    expect(b.note).toContain("v0.7"); // 축소안 이월 고지
+    expect(b.note).toContain("다음 버전"); // 이월 고지(평이 문구)
   });
 
   it("GET /api/evals/:loop → 추세(scorecards-inprocess)", async () => {

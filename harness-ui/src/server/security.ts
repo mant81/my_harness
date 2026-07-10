@@ -68,7 +68,12 @@ export function registerSecurity(app: FastifyInstance, sec: SecurityState): void
       const pathname = new URL(req.url, "http://localhost").pathname; // authority-form·path-form 모두 pathname
       url = decodeURIComponent(pathname);
     } catch { return reply.code(400).send({ error: "bad-target" }); }
-    if (!url.startsWith("/api/")) return;                       // 정적 자원 통과
+    if (!url.startsWith("/api/")) {
+      // 정적 자원(SPA 셸·JS·CSS·/healthz): **토큰 불요**(비인증 로드 → 이후 /api/auth/exchange).
+      // 단 Host 게이트는 적용(DNS rebinding 심층방어). allowedHost = 127.0.0.1|localhost|[::1] + 포트.
+      if (!allowedHost(req.headers.host, sec.port)) return reply.code(403).send({ error: "bad-host" });
+      return;
+    }
     if (url === "/api/auth/exchange") return;                   // 교환 엔드포인트는 자체 검증
     if (!allowedHost(req.headers.host, sec.port)) return reply.code(403).send({ error: "bad-host" }); // DNS rebinding 방지
     const mutating = req.method !== "GET" && req.method !== "HEAD";

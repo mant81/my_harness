@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { registerApi } from "./api/index.js";
+import { registerStatic, DIST_ROOT } from "./static.js";
 import { makeSecurity, registerSecurity, type SecurityState } from "./security.js";
 import { loadConfigFromDisk, projectsHomeFromEnv } from "./lib/config.js";
 import { validateProjectRoot, type ValidateResult } from "./lib/projectroot.js";
@@ -65,10 +66,16 @@ export async function resolveBootProjectRoot(deps?: {
 export function buildServer(opts: {
   security?: SecurityState; projectRoot?: string;
   buildExec?: import("./lib/builddraft.js").ExecFn; // F10(M15): 빌드 초안 exec 경계 주입(테스트 mock).
+  distRoot?: string; // 단일 오리진 정적 서빙 루트(기본 DIST_ROOT·테스트는 임시 dist 주입).
 } = {}) {
-  const app = Fastify({ logger: false });
+  // 보안 불변식: caseSensitive(기본 true)·단일 %-디코딩(find-my-way 기본)에 의존한다.
+  //   토큰 게이트(security.ts)는 `new URL`+decodeURIComponent 로 라우터보다 강하게 정규화하므로
+  //   `/API/harness`·`//api/harness` 류가 게이트를 건너뛰고 API 핸들러에 도달할 수 없다.
+  //   caseSensitive:false / lenient 옵션을 켜면 이 불변식이 깨진다 — 켜지 말 것(회귀 테스트: staticserve.test.ts ⑦).
+  const app = Fastify({ logger: false, routerOptions: { caseSensitive: true } });
   if (opts.security) registerSecurity(app, opts.security);
   registerApi(app, opts.projectRoot ?? projectRoot, { buildExec: opts.buildExec });
+  registerStatic(app, opts.distRoot ?? DIST_ROOT); // SPA 셸 정적 서빙(notFoundHandler·경화 리더 confine)
   return app;
 }
 

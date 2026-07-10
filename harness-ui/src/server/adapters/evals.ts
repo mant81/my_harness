@@ -78,17 +78,17 @@ export type ScorecardResult =
 //   불일치/재계산불가는 "미검증"(verified=false) — 축소안에선 게이트 제외·표시 배지(브릭 아님).
 function verifyAlignment(card: Scorecard): { verified: boolean; reason: string | null } {
   const vc = card.verdict_counts;
-  if (!vc) return { verified: false, reason: "verdict_counts 부재 — 재도출 불가(미검증)" };
+  if (!vc) return { verified: false, reason: "판정 건수 없음 — 검증 불가(미검증)" };
   const c = vc.confirmed ?? 0, p = vc.partial ?? 0, r = vc.rejected ?? 0;
   const denom = c + p + r;
   const recomputed = denom > 0 ? (c + 0.5 * p) / denom : null;
   const precomputed = card.alignment_score ?? null;
   if (recomputed === null && precomputed === null) return { verified: true, reason: null };
   if (recomputed === null || precomputed === null) {
-    return { verified: false, reason: "alignment_score 재도출↔precomputed 불일치(미검증)" };
+    return { verified: false, reason: "정합도 재계산값이 기록값과 불일치(미검증)" };
   }
   if (Math.abs(recomputed - precomputed) > ALIGN_EPSILON) {
-    return { verified: false, reason: `alignment_score 위조 의심 — precomputed=${precomputed} ≠ 재도출=${recomputed.toFixed(6)}(격리·미검증)` };
+    return { verified: false, reason: `정합도 값 불일치(위조 의심) — 기록값 ${precomputed} ≠ 재계산 ${recomputed.toFixed(6)}(미검증)` };
   }
   return { verified: true, reason: null };
 }
@@ -96,16 +96,16 @@ function verifyAlignment(card: Scorecard): { verified: boolean; reason: string |
 async function readScorecard(dir: string): Promise<ScorecardResult> {
   const r = await readJsonCapped(dir, "scorecard.json"); // O_NOFOLLOW·fstat·MAX_JSON_BYTES(대용량→oversize skip)
   if (!r.ok) {
-    return { kind: "corrupt", reason: r.oversize ? "scorecard.json 크기상한 초과(격리)" : "scorecard.json 판독불가/부재" };
+    return { kind: "corrupt", reason: r.oversize ? "기록 파일 크기상한 초과(손상)" : "기록 파일 판독불가/부재" };
   }
   const obj = r.value;
   // eval-unavailable 상태(jq 부재 등) 그대로 통과 표시 — 고장 아님(A104).
   if (obj !== null && typeof obj === "object" && (obj as Record<string, unknown>).eval_status === "eval-unavailable") {
-    const reason = String((obj as Record<string, unknown>).reason ?? "eval-unavailable");
+    const reason = String((obj as Record<string, unknown>).reason ?? "측정 불가(도구 없음)");
     return { kind: "unavailable", reason };
   }
   const p = Scorecard.safeParse(obj);
-  if (!p.success) return { kind: "corrupt", reason: "scorecard 스키마 위반(격리)" };
+  if (!p.success) return { kind: "corrupt", reason: "기록 형식 위반(손상)" };
   const v = verifyAlignment(p.data);
   return { kind: "ok", card: p.data, verified: v.verified, unverifiedReason: v.reason };
 }
@@ -170,7 +170,7 @@ export interface EvalsIndex {
   note: string;             // 축소안 고지(추세/게이트 = in-process·미검증)
 }
 
-const REDUCED_NOTE = "축소안(v0.6): 추세·게이트는 in-process 재계산(암호 rollup/서명 없음 — v0.7 이월). scorecard 무결성은 verdict_counts 재도출로 검증하며, 최종 방어는 사람 승인입니다.";
+const REDUCED_NOTE = "이 버전에서는 추세·판정 기준을 화면에서 다시 계산합니다(서명된 기록 원장은 다음 버전 예정). 기록 무결성은 판정 건수로 다시 계산해 검증하며, 최종 확인은 사람 승인입니다.";
 
 // 한 loop 의 최신 run 만 해석(agy#1·인덱스 전용): stage/run 이름 열거로 runCount 산출·전역 newest 1건 특정,
 //   그 1건의 scorecard 만 read. 열거는 budget(전역 잔여 스캔) 안에서만. read 는 loop 당 ≤1(OOM/DoS 방어).
@@ -464,7 +464,7 @@ export async function loopProposal(root: string, loop: string, cfg: EvalsConfigR
     provenance: {
       sourcePaths: windowRuns.map((r) => `_workspace/evals/${loop}/${r.stageId}/${r.runId}/scorecard.json`),
       runIds: windowRuns.map((r) => r.runId),
-      computedBy: "harness-ui/server/adapters/evals.ts (in-process 재도출 · 축소안)",
+      computedBy: "harness-ui 서버 · 판정 건수 기반 재도출",
       sampleSize: observations,
       verificationStatus: `verified ${dedup.length}/${okRuns.length} · window ${windowRuns.length}/rollingN ${rollingN} (dedup·최신 window 집계 · 재도출 일치분만 · 암호 rollup 미사용 v0.7)`,
     },
