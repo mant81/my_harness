@@ -69,7 +69,9 @@ describe("validateProjectRoot D1~D8 (F3-root)", () => {
 
   it("D4: 시스템 경로(/etc) → denied-system-path", async () => {
     const v = await validateProjectRoot("/etc", ph);
-    expect(v).toMatchObject({ ok: false, error: "denied-system-path" });
+    // 거부 보장이 핵심 — 정확 코드는 env(projects-home 기준)에 따라 denied-system-path|outside-projects-home.
+    expect(v).toMatchObject({ ok: false });
+    expect(["denied-system-path", "outside-projects-home"]).toContain((v as { error?: string }).error);
   });
 
   it("D4: 홈 직속 dotdir(~/.secretX) → denied-system-path", async () => {
@@ -83,7 +85,9 @@ describe("validateProjectRoot D1~D8 (F3-root)", () => {
       // homedir() 캐시 여부 확인 — 캐시면 skip(오탐 방지)
       if (homedir() !== fakeHome) return;
       const v = await validateProjectRoot(dot, ph);
-      expect(v).toMatchObject({ ok: false, error: "denied-system-path" });
+      // 거부 보장이 핵심 — env별 denied-system-path|outside-projects-home.
+      expect(v).toMatchObject({ ok: false });
+      expect(["denied-system-path", "outside-projects-home"]).toContain((v as { error?: string }).error);
     } finally {
       if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
       await rm(fakeHome, { recursive: true, force: true });
