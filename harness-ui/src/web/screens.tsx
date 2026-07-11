@@ -74,7 +74,7 @@ import {
 type Inv = { projectRoot: string; claude: { entrypoint: string | null; agents: number; skills: number }; codex: { entrypoint: string | null; agents: number; skills: number }; workspace: { exists: boolean; runs: number } };
 type Rt = Record<string, { installed: boolean; version: string | null }>;
 type Stats = {
-  configHealth: { agents: number; skills: number; orchestratorPresent: boolean; claudePointer: boolean; agentsPointer: boolean; orphanAgents: string[]; orphanSkills: string[]; coverageConfidence: string };
+  configHealth: { agents: number; skills: number; orchestratorPresent: boolean; claudePointer: boolean; agentsPointer: boolean; orphanAgents: string[]; orphanSkills: string[]; linkUnknownAgents?: string[]; deadLinks?: string[]; coverageGaps?: string[]; coverageConfidence: string };
   d4: { projects: Array<{ project: string; resultDocs: number; missingNextStep: number }>; workspaceAbandoned: number };
   update: { manifest: boolean; factoryDrift: string };
   evolution: Array<{ date: string; change: string; source: string }>;
@@ -157,6 +157,9 @@ export function Overview() {
               ["CLAUDE.md / AGENTS.md", <>{s.configHealth.claudePointer ? "✓" : "✗"} / {s.configHealth.agentsPointer ? "✓" : "✗"}</>],
               ["고아 에이전트", s.configHealth.orphanAgents.length ? <Badge kind="warn">{s.configHealth.orphanAgents.join(", ")}</Badge> : "0"],
               ["고아 스킬", s.configHealth.orphanSkills.length ? <Badge kind="warn">{s.configHealth.orphanSkills.join(", ")}</Badge> : "0"],
+              ["미선언(link_unknown)", s.configHealth.linkUnknownAgents?.length ? <Badge kind="muted">{s.configHealth.linkUnknownAgents.join(", ")}</Badge> : "0"],
+              ["dead-link", s.configHealth.deadLinks?.length ? <Badge kind="warn">{s.configHealth.deadLinks.join(", ")}</Badge> : "0"],
+              ["커버리지 갭", s.configHealth.coverageGaps?.length ? <Badge kind="muted">{s.configHealth.coverageGaps.join(", ")}</Badge> : "0"],
               ["커버리지 신뢰도", s.configHealth.coverageConfidence],
             ]} />
           </Card>

@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { readdir, stat, lstat, open } from "node:fs/promises";
 import { join } from "node:path";
 import { readAgents, readSkills } from "./harness.js";
+import { computeHarnessScorecard } from "./scorecard.js";
 import { loadConfigFromDisk, projectsHomeFromEnv } from "../lib/config.js";
 
 const MAX_DOCS = 1000;        // 프로젝트당 결과서 스캔 상한
@@ -40,18 +41,23 @@ export async function stateStats(root: string) {
   const agents = await readAgents(root);
   const skills = await readSkills(root);
 
-  // A35 구성 건강도. 커버리지=heuristic(선언 파싱). 고아=측정.
-  const skillNames = new Set(skills.map((s) => s.name));
-  const orphanSkills = skills.filter((s) => !agents.some((a) => a.skills.includes(s.name))).map((s) => s.name); // 선언 링크 없음(heuristic)
-  const orphanAgents = agents.filter((a) => a.skills.length === 0).map((a) => a.name);
+  // A35 구성 건강도 = harness_scorecard 계층A SSOT(공용 lib) 파생. 기존 buildClaudeAgent skills:[] 하드코딩 버그 해소:
+  // orphanAgents/orphanSkills 는 findings 의 subject_kind 로 분리·미선언은 link_unknown 별도(고아 아님·전수 오탐 0).
+  const sc = await computeHarnessScorecard(root, { now: new Date().toISOString().slice(0, 10) }); // waiver 만료 판정용 현재일(YYYY-MM-DD)
+  const bySubject = (t: string, kind: string) =>
+    sc.findings.filter((f) => f.type === t && f.subject_kind === kind && !f.waived).map((f) => f.subject);
   const configHealth = {
     agents: agents.length, skills: skills.length,
     orchestratorPresent: skills.some((s) => /orchestrat|오케스트/i.test(s.name + s.description)),
     claudePointer: await exists(join(root, "CLAUDE.md")),
     agentsPointer: await exists(join(root, "AGENTS.md")),
-    orphanAgents, orphanSkills,
+    orphanAgents: bySubject("orphan", "agent"),
+    orphanSkills: bySubject("orphan", "skill"),
+    linkUnknownAgents: bySubject("link_unknown", "agent"),  // 미선언(migration-debt·고아 아님)
+    deadLinks: sc.findings.filter((f) => f.type === "dead_link" && !f.waived).map((f) => `${f.subject}→${f.target}`),
+    coverageGaps: bySubject("coverage_gap", "agent"),
     coverageConfidence: "heuristic" as const,
-    _unusedSkillNames: [...skillNames].length,
+    configHash: sc.config_hash,
   };
 
   // A36 D4 규율(TS 네이티브 — 셸 금지). docs/*/working_history 결과서 + `## 다음 단계 참조` + _workspace 방치.

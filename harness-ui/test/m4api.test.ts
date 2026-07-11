@@ -71,9 +71,13 @@ describe("drift/statestats 어댑터 직접(임시 레포)", () => {
     const f = await detectDrift(root);
     expect(f.some((x) => x.severity === "missing-runtime-peer")).toBe(true);
   });
-  it("stateStats: evolution 파싱·orphan 감지", async () => {
+  it("stateStats: evolution 파싱·구성 분류(고아 오탐 해소)", async () => {
     const s = await stateStats(root);
     expect(s.evolution.length).toBeGreaterThanOrEqual(1);
-    expect(s.configHealth.orphanAgents).toContain("planner"); // 스킬 선언 링크 없음
+    // planner 는 skills: 미선언 → link_unknown(migration-debt). 고아 아님(구 버그: skills:[] 하드코딩으로 전수 고아 오탐).
+    expect(s.configHealth.orphanAgents).not.toContain("planner");
+    expect(s.configHealth.linkUnknownAgents).toContain("planner");
+    // s1 은 어떤 에이전트도 선언 안 함 → orphan skill.
+    expect(s.configHealth.orphanSkills).toContain("s1");
   });
 });
