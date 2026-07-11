@@ -296,7 +296,20 @@ async function computeHarnessScorecard(root2, opts = {}) {
   let hasOrchestrator = false;
   const findings = [];
   const push = (f) => findings.push({ ...f, id: canonicalFindingId(f), waived: false });
+  const isOrchestratorName = (n, d) => /orchestrat|오케스트/i.test(n + " " + d);
   for (const s of skills) {
+    const anyOrchDeclared = Object.values(s.orchestratesByRuntimePath).some((e) => e.declared || e.syntax === "invalid_scalar");
+    if (isOrchestratorName(s.name, s.description) && !anyOrchDeclared)
+      push({
+        type: "link_unknown",
+        subject: s.name,
+        subject_kind: "skill",
+        runtime: skillRuntime(s.runtimePaths[0]),
+        severity: "info",
+        provenance: "orchestrates",
+        confidence: "measured",
+        detail: "\uC624\uCF00\uC2A4\uD2B8\uB808\uC774\uD130 \uCD94\uC815\xB7orchestrates \uBBF8\uC120\uC5B8(\uB9C8\uC774\uADF8\uB808\uC774\uC158 \uBD80\uCC44)"
+      });
     for (const [rp, ev] of Object.entries(s.orchestratesByRuntimePath)) {
       if (ev.syntax === "invalid_scalar") {
         push({

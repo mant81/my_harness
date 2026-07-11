@@ -1,5 +1,7 @@
 # 루프 자체 평가 (Loop Self-Evaluation) — scorecard & 단계적 도입
 
+> **위치(2026-07 재편):** 자기평가 주축은 **하네스 구성 상태**(`references/harness-scorecard.md`). 이 문서(`loop_scorecard`·external-review 루프 효율)는 그 아래 **`loop_ref` 느슨결합 보조 신호**로 강등됐다. 루프 효율 측정·단계적 도입은 여기서 계속 관리하되, "자기평가가 무엇을 개선하나"의 답은 구성 개선(harness_scorecard)이다.
+
 루프(external-review-loop 등)가 자기 실행을 측정해 흐름 개선으로 환류하는 닫힌 고리. **외부 리뷰(codex/agy) 검증을 거쳐 교정된 정본** — 순진한 precision·자동 적용·grading.json 재사용을 모두 제거했다.
 
 ## 핵심 경계 (먼저 읽을 것)

@@ -103,4 +103,12 @@ describe("impl R1 회귀", () => {
     expect(sc.findings.filter((f) => f.type === "dead_link" && f.subject === "a").length).toBe(1);
     expect(sc.counts.dead_link).toBe(1);
   });
+
+  it("M-B R2: 오케스트레이터 추정 스킬이 orchestrates 미선언 → link_unknown(마이그레이션 미탐 방지)", async () => {
+    root = await fx({ a: fm({ name: "a", skills: "[myorch]" }) },
+      { myorch: fm({ name: "myorch", description: "팀을 조율하는 오케스트레이터" }) });
+    const sc = await computeHarnessScorecard(root, { now: "2026-07-11" });
+    const f = sc.findings.find((x) => x.subject === "myorch" && x.provenance === "orchestrates")!;
+    expect(f.type).toBe("link_unknown");
+  });
 });

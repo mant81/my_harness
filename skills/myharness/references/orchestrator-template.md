@@ -23,6 +23,7 @@
 ---
 name: {domain}-orchestrator
 description: "{도메인} 에이전트 팀을 조율하는 오케스트레이터. {초기 실행 키워드}. 후속 작업: {도메인} 결과 수정, 부분 재실행, 업데이트, 보완, 다시 실행, 이전 결과 개선 요청 시에도 반드시 이 스킬을 사용."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(오케스트레이터 필수). references/harness-scorecard.md
 ---
 
 # {Domain} Orchestrator
@@ -176,6 +177,7 @@ description: "{도메인} 에이전트 팀을 조율하는 오케스트레이터
 ---
 name: {domain}-orchestrator
 description: "{도메인} 에이전트를 조율하는 오케스트레이터. {초기 실행 키워드}. 후속 작업 키워드 포함."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(필수). references/harness-scorecard.md
 ---
 
 ## 실행 모드: 서브 에이전트
@@ -229,6 +231,7 @@ Phase마다 다른 실행 모드를 사용한다. 각 Phase 상단에 `**실행 
 ---
 name: {domain}-orchestrator
 description: "{도메인} 오케스트레이터 (하이브리드). {키워드}. 후속 작업 키워드 포함."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(필수). references/harness-scorecard.md
 ---
 
 ## 실행 모드: 하이브리드
