@@ -247,14 +247,20 @@ myharness lives at the **meta-factory** layer of the Claude Code agent ecosystem
 
 ## Companion: My Harness Web
 
-A local web panel that **observes and controls** a built harness. It reads the file state under `_workspace/runs/**` and surfaces inventory, executions, history, documents, drift, and evaluation on one screen — the things the CLI can't show at a glance.
+A local web app that **observes and controls** a built harness. It reads the file state under `_workspace/runs/**` and surfaces inventory, executions, history, documents, drift, evaluation, and harness composition on one screen — the things the CLI can't show at a glance. It also **auto-builds a whole harness** from a single domain sentence (draft → human review → create).
 
 - **Run:** `cd harness-ui && npm install && npm start` — builds, serves a single origin on `127.0.0.1:5174`, and opens the browser with a one-time (fragment) token. Dev mode: `npm run dev`.
-- **Screens (grouped sidebar):** Overview · New Run / History · Agents / Skills / Context · Docs · Drift / Ops / Eval · Settings. Flow: New Run → run created → observe in History (fire-and-observe).
-- **Security & scope:** local 127.0.0.1 only · token bootstrap → session · read-first (the only mutating paths are definition editing, projectRoot, and eval config — whitelisted, atomic, gated off by default). History/stats reflect **UI-launched runs only**; terminal CLI runs are out of scope until v0.7 (CLI session-log observability).
-- **Docs:** [`docs/harness-ui/`](docs/harness-ui/README.md) — v0.5 (certified core) · v0.6 (converged & implemented) · v0.7 (planned). App package: [`harness-ui/`](harness-ui/README.md).
+- **Features:** v0.5 certified core (supervisor · OS adapters · security · launcher) + v0.6 full features (F2 prefill New Run · F3 projectRoot edit · F4 history · F5 doc/artifact viewer · F6 observability · F7 definition editor · F8 Eval dashboard · F9 Docs sources · F10 multi-runtime context) + **config-centric self-evaluation** (harness_scorecard, adoption-stage gate) + **whole-harness auto-build**.
+- **Screens (11, grouped sidebar):** Overview · **Harness** / Agents / Skills / Context / History · Docs · Runs / Drift / Ops / Eval · Settings. Flow: domain → Harness auto-build (draft → create) or New Run → run created → observe (fire-and-observe).
+- **Security & scope:** local 127.0.0.1 only · token bootstrap → session · read-first (the only mutating paths are definition editing, projectRoot, eval config, and harness build — whitelisted, atomic, gated off by default; auto-build runs no-tools isolated exec with no auto-apply). History/stats reflect **UI-launched runs only**; terminal CLI runs are out of scope until v0.7 (CLI session-log observability).
 
-> A distinct sub-project from the factory: the factory *generates* harnesses; My Harness Web *operates* one. Its own version line (v0.5/0.6) is separate from the factory version above.
+**Detailed docs**
+- App package & dev guide → [`harness-ui/README.md`](harness-ui/README.md)
+- Docs hub (design · PRD · acceptance criteria · audit history) → [`docs/harness-ui/`](docs/harness-ui/README.md)
+- v0.6 design (implemented) → [`docs/harness-ui/v0.6/design/design-v0.6.md`](docs/harness-ui/v0.6/design/design-v0.6.md) · PRD → [`docs/harness-ui/v0.6/prd/`](docs/harness-ui/v0.6/prd/)
+- v0.7 plan (CLI session-log observability) → [`docs/harness-ui/v0.7/`](docs/harness-ui/v0.7/)
+
+> A distinct sub-project from the factory: the factory *generates* harnesses; My Harness Web *operates* one (and can auto-build one). Its own version line (v0.5/0.6) is separate from the factory version above.
 
 ## Requirements
 

@@ -245,14 +245,20 @@ myharness は Claude Code エージェントエコシステムの **メタファ
 
 ## コンパニオン: My Harness Web
 
-ビルド済みハーネスを **観測・制御** するローカル Web パネル。`_workspace/runs/**` のファイル状態を読み、インベントリ・実行・履歴・ドキュメント・drift・評価を 1 画面に集約します — CLI では一目で見えないもの。
+ビルド済みハーネスを **観測・制御** するローカル Web アプリ。`_workspace/runs/**` のファイル状態を読み、インベントリ・実行・履歴・ドキュメント・drift・評価・ハーネス構成を 1 画面に集約します — CLI では一目で見えないもの。ドメインの一文から **ハーネス全体を自動ビルド** することもできます（ドラフト → 人間レビュー → create）。
 
 - **実行：** `cd harness-ui && npm install && npm start` — ビルド後 `127.0.0.1:5174` を単一オリジンで配信し、ワンタイム（fragment）トークンのリンクでブラウザを開く。開発：`npm run dev`。
-- **画面（グループサイドバー）：** Overview · New Run / History · Agents / Skills / Context · Docs · Drift / Ops / Eval · Settings。フロー：New Run → run 生成 → History で観測（fire-and-observe）。
-- **セキュリティ・範囲：** ローカル 127.0.0.1 のみ · トークン bootstrap → セッション · 読み取り優先（mutating は定義編集・projectRoot・評価 config のみ — ホワイトリスト・アトミック・既定 off ゲート）。履歴・統計は **UI で実行した run のみ** 反映、ターミナル CLI 実行は v0.7（CLI セッションログ観測）まで範囲外。
-- **ドキュメント：** [`docs/harness-ui/`](docs/harness-ui/README.md) — v0.5（正本コア）· v0.6（収束・実装）· v0.7（企画）。アプリパッケージ：[`harness-ui/`](harness-ui/README.md)。
+- **機能：** v0.5 正本コア（supervisor · OS アダプター · セキュリティ · ランチャー）+ v0.6 全機能（F2 プリフィル New Run · F3 projectRoot 編集 · F4 履歴 · F5 ドキュメント/artifact ビューア · F6 観測性 · F7 定義エディタ · F8 Eval ダッシュボード · F9 Docs ソース · F10 マルチランタイムコンテキスト）+ **config-centric 自己評価**（harness_scorecard · 採用段階ゲート）+ **ハーネス全体の自動ビルド**。
+- **画面（11 · グループサイドバー）：** Overview · **Harness** / Agents / Skills / Context / History · Docs · Runs / Drift / Ops / Eval · Settings。フロー：ドメイン → Harness 自動ビルド（ドラフト → create）または New Run → run 生成 → 観測（fire-and-observe）。
+- **セキュリティ・範囲：** ローカル 127.0.0.1 のみ · トークン bootstrap → セッション · 読み取り優先（mutating は定義編集・projectRoot・評価 config・ハーネスビルドのみ — ホワイトリスト・アトミック・既定 off ゲート、自動ビルドは no-tools isolated exec + no-auto-apply）。履歴・統計は **UI で実行した run のみ** 反映、ターミナル CLI 実行は v0.7（CLI セッションログ観測）まで範囲外。
 
-> ファクトリーとは区別されるサブプロジェクト：ファクトリーはハーネスを *生成* し、My Harness Web は 1 つを *運用* します。自身のバージョンライン（v0.5/0.6）は上記のファクトリーバージョンとは別です。
+**詳細ドキュメント**
+- アプリパッケージ・開発ガイド → [`harness-ui/README.md`](harness-ui/README.md)
+- ドキュメントハブ（設計 · PRD · 受け入れ基準 · 監査履歴） → [`docs/harness-ui/`](docs/harness-ui/README.md)
+- v0.6 設計（実装済み） → [`docs/harness-ui/v0.6/design/design-v0.6.md`](docs/harness-ui/v0.6/design/design-v0.6.md) · PRD → [`docs/harness-ui/v0.6/prd/`](docs/harness-ui/v0.6/prd/)
+- v0.7 企画（CLI セッションログ観測） → [`docs/harness-ui/v0.7/`](docs/harness-ui/v0.7/)
+
+> ファクトリーとは区別されるサブプロジェクト：ファクトリーはハーネスを *生成* し、My Harness Web は 1 つを *運用* します（自動ビルドも可能）。自身のバージョンライン（v0.5/0.6）は上記のファクトリーバージョンとは別です。
 
 ## 要件
 
