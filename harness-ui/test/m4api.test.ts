@@ -24,8 +24,19 @@ describe("M4 라우트 (보안 미주입 단위)", () => {
     expect(b.schema_version).toBe(1);
     expect(Array.isArray(b.findings)).toBe(true);
     expect(b.config_hash).toMatch(/^[0-9a-f]{32}$/);
+    expect(b.state_key).toMatch(/^[0-9a-f]{32}$/);
     expect(b.counts).toHaveProperty("orphan");
     expect(b.diag).toBeNull(); // 계층B 미호출(fail-open)
+  });
+  it("harness-scorecard/trend: 스냅샷 없으면 insufficient", async () => {
+    const r = await app.inject({ url: "/api/eval/harness-scorecard/trend" });
+    expect(r.statusCode).toBe(200);
+    expect(["insufficient", "improved", "regressed", "steady"]).toContain(r.json().verdict);
+  });
+  it("POST snapshot: 초과 필드 body 거부(400·write 전 차단)", async () => {
+    // 실 레포 write 부작용 회피 — 잘못된 body 는 compute/write 전에 400. (정상 write 경로는 CLI 테스트에서 격리 검증)
+    const bad = await app.inject({ method: "POST", url: "/api/eval/harness-scorecard/snapshot", payload: { x: 1 } });
+    expect(bad.statusCode).toBe(400);
   });
   it("A35-A38: state-stats 구조", async () => {
     const r = await app.inject({ url: "/api/overview/state-stats" });

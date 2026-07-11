@@ -27,7 +27,7 @@
 **backfill(기존 하네스):** 계약 전 하네스는 전원 `link_unknown`(정상·감점 아님). 마이그레이션 = 각 에이전트에 `skills:`·오케스트레이터에 `orchestrates:` 추가 → 실 연결로 해소. 미선언 상태를 강제 실패로 보지 않는다(migration-debt 카운트).
 
 ## 트리거 = 2 cadence
-- **무거운 정적 재계산:** Phase 0(현황 감사)·Phase 7-5(구성 수정 직후)·명시 점검. **일반 run 종료엔 재계산 안 함**(파일 미변경·노이즈 방지).
+- **무거운 정적 재계산 + 스냅샷 축적:** Phase 0(현황 감사)·Phase 7-5(구성 수정 직후)·명시 점검. 오케스트레이터가 이 시점에 **`node scripts/harness-scorecard.mjs --snapshot`**(harness-ui 있으면 `POST /api/eval/harness-scorecard/snapshot`) 실행 → `_workspace/evals/harness_summary.jsonl`에 **append-on-state-change**(구성/waiver 변화 시만·중복 skip). 이게 추세(개선/퇴행) 데이터의 유일 축적 경로. **일반 run 종료엔 재계산 안 함**(파일 미변경·노이즈 방지).
 - **얇은 동적 인터셉터(run 종료):** `loop_scorecard` 추세만 검사 → 임계 초과 시 **스냅샷 읽고 config_hash 대조**. 일치 시 구성 개선 제안, 불일치/부재 시 "정적 감사 요청"만(무거운 재계산은 구성변경 cadence로).
 - **저비용 스캔:** waiver 만료·baseline 노후 = release/update 시점.
 

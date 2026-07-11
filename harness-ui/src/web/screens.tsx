@@ -1634,49 +1634,120 @@ function SafeMd({ text }: { text: string }) {
   return <div className="md-body scorecard-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }} />;
 }
 
-type ScFinding = { id: string; type: string; subject: string; subject_kind: string; target?: string; runtime: string; severity: string; waived: boolean; detail?: string };
+type ScFinding = { id: string; type: string; subject: string; subject_kind: string; target?: string; runtime: string; severity: string; provenance: string; waived: boolean; waiver_expires_at?: string; waiver_reason?: string; detail?: string };
 type HarnessScorecard = {
   scope: { root: string; runtime: string };
   counts: Record<string, number> & { agents: number; skills: number };
   findings: ScFinding[];
-  config_hash: string;
+  config_hash: string; state_key: string; stale: boolean;
+  factory: { policyAuditApplicable: boolean } | null;
+  built: { portable: boolean };
+  loop_ref: { path: string } | null;
+  diag: unknown | null;
+};
+type ScTrend = {
+  points: { at: string; penalized: number; debt: number }[];
+  verdict: "improved" | "regressed" | "steady" | "insufficient";
+  delta: number | null; findingDelta: "available" | "approximate";
+  newFindings: string[] | null; resolvedFindings: string[] | null;
+  latest: { debt: number; generated_at: string } | null;
 };
 const FINDING_LABEL: Record<string, string> = {
   orphan: "고아", link_unknown: "미선언(부채)", dead_link: "dead-link", coverage_gap: "커버리지 갭",
   unknown_scope: "교차 scope", incomplete_def: "정의 불완전", oversize: "500줄 초과",
 };
+const VERDICT: Record<string, { label: string; kind: "ok" | "warn" | "muted" }> = {
+  improved: { label: "개선", kind: "ok" }, regressed: { label: "퇴행", kind: "warn" },
+  steady: { label: "유지", kind: "muted" }, insufficient: { label: "데이터 부족", kind: "muted" },
+};
 
 function HarnessScorecardCard() {
   const sc = useApi<HarnessScorecard>("/api/eval/harness-scorecard");
+  const trend = useApi<ScTrend>("/api/eval/harness-scorecard/trend");
+  const [snapMsg, setSnapMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const recordSnapshot = async () => {
+    setBusy(true); setSnapMsg(null);
+    try {
+      const r = await apiPost<{ written: boolean }>("/api/eval/harness-scorecard/snapshot", {});
+      setSnapMsg(r.written ? "스냅샷 기록됨 — 추세 갱신" : "변경 없음(스킵)");
+      trend.reload();
+    } catch (e) { setSnapMsg("기록 실패: " + String(e)); }
+    finally { setBusy(false); }
+  };
   return (
     <Card title="구성 자기평가 (harness_scorecard · 주축)">
       <p className="muted">
-        하네스 <b>구성 상태</b>(에이전트·스킬·오케스트레이터 연결)를 정적 파싱으로 측정. 아래 루프 평가(loop_scorecard)는 보조 신호. ·
+        하네스 <b>구성 상태</b>(에이전트·스킬·오케스트레이터 연결)를 정적 파싱으로 측정. 아래 루프 평가는 보조 신호(loop_ref). ·
         <b>미선언(link_unknown)은 "아직 모름"</b>(감점 아님·마이그레이션 부채) — 고아(확실히 무연결)와 구분.
       </p>
       <Async state={sc}>{(d) => {
         const active = d.findings.filter((f) => !f.waived);
+        const waived = d.findings.filter((f) => f.waived);
         const byType = (t: string) => active.filter((f) => f.type === t);
+        const orphanBy = (k: string) => active.filter((f) => f.type === "orphan" && f.subject_kind === k).length;
         const order = ["orphan", "dead_link", "coverage_gap", "incomplete_def", "oversize", "unknown_scope", "link_unknown"];
         return (
           <>
+            {/* A. 라이브 건강도 */}
             <Table cols={["항목", "값"]} rows={[
               ["범위(runtime)", <Badge kind={d.scope.runtime === "factory" ? "ok" : "muted"}>{d.scope.runtime}</Badge>],
               ["에이전트 / 스킬", `${d.counts.agents} / ${d.counts.skills}`],
-              ["config_hash", <code>{d.config_hash.slice(0, 12)}</code>],
+              ["고아 — 에이전트 / 스킬", `${orphanBy("agent")} / ${orphanBy("skill")}`],
+              ["namespace", <>
+                <Badge kind={d.factory ? "ok" : "muted"}>factory {d.factory ? "policy-audit" : "n/a"}</Badge>{" "}
+                <Badge kind="muted">built portable</Badge>{" "}
+                <Badge kind="muted">diag {d.diag ? "있음" : "미실행"}</Badge>{" "}
+                {d.loop_ref && <Badge kind="muted">loop_ref</Badge>}{d.stale && <> <Badge kind="warn">stale</Badge></>}
+              </>],
+              ["state_key", <code>{d.state_key.slice(0, 12)}</code>],
             ]} />
             <Table cols={["분류", "건수", "대상"]} rows={order.map((t) => {
               const items = byType(t);
               const isDebt = t === "link_unknown" || t === "unknown_scope";
+              const sev = items[0]?.severity;
               return [
-                FINDING_LABEL[t] ?? t,
-                items.length ? <Badge kind={isDebt ? "muted" : items.length ? "warn" : "ok"}>{items.length}</Badge> : "0",
-                items.length ? items.slice(0, 8).map((f) => f.subject + (f.target ? `→${f.target}` : "")).join(", ") + (items.length > 8 ? " …" : "") : "—",
+                <>{FINDING_LABEL[t] ?? t}{sev && items.length > 0 && <> <Badge kind={sev === "high" || sev === "med" ? "warn" : "muted"}>{sev}</Badge></>}</>,
+                items.length ? <Badge kind={isDebt ? "muted" : "warn"}>{items.length}</Badge> : "0",
+                items.length ? (
+                  <details className="tier-b"><summary>{items.slice(0, 4).map((f) => f.subject + (f.target ? `→${f.target}` : "")).join(", ")}{items.length > 4 ? " …" : ""}</summary>
+                    <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
+                      {items.map((f) => <li key={f.id}><code>{f.subject}{f.target ? `→${f.target}` : ""}</code> <span className="muted">· {f.provenance}{f.detail ? ` · ${f.detail}` : ""}</span></li>)}
+                    </ul>
+                  </details>
+                ) : "—",
               ];
             })} />
-            {active.filter((f) => f.type === "orphan" && f.subject_kind === "agent").length === 0 && (
-              <p className="muted">✓ 고아 에이전트 0 — skills 실파싱(구 A35 전수 오탐 해소).</p>
+            {orphanBy("agent") === 0 && <p className="muted">✓ 고아 에이전트 0 — skills 실파싱(구 A35 전수 오탐 해소).</p>}
+            {waived.length > 0 && (
+              <details className="tier-b"><summary>억제(waived) {waived.length}건</summary>
+                <Table cols={["항목", "만료", "사유"]} rows={waived.map((f) => [
+                  `${FINDING_LABEL[f.type] ?? f.type}: ${f.subject}${f.target ? `→${f.target}` : ""}`,
+                  f.waiver_expires_at ?? "무기한", f.waiver_reason ?? "—",
+                ])} />
+              </details>
             )}
+            {/* B. 추세 */}
+            <h3 style={{ marginTop: 18 }}>추세</h3>
+            <Async state={trend}>{(t) => {
+              const v = VERDICT[t.verdict]!;
+              return (
+                <Table cols={["항목", "값"]} rows={[
+                  ["판정", <><Badge kind={v.kind}>{v.label}</Badge>{t.delta != null && <span className="muted"> (감점 Δ {t.delta > 0 ? "+" : ""}{t.delta})</span>}</>],
+                  ["신규 / 해소", t.findingDelta === "approximate" ? <span className="muted">근사(항목 초과)</span> :
+                    `${t.newFindings?.length ?? 0} / ${t.resolvedFindings?.length ?? 0}`],
+                  ["부채(link_unknown)", t.latest ? String(t.latest.debt) : "—"],
+                  ["스냅샷 수 / 마지막 기록", `${t.points.length}${t.latest ? " · " + t.latest.generated_at : ""}`],
+                ]} />
+              );
+            }}</Async>
+            {trend.data?.verdict === "insufficient" && (
+              <p className="muted">추세 미축적(스냅샷 &lt;2) — 오케스트레이터 Phase 0/7-5가 <code>harness-scorecard.mjs --snapshot</code> 실행 시 쌓임. 또는 아래 [지금 기록].</p>
+            )}
+            <div style={{ marginTop: 10 }}>
+              <button type="button" className="primary" disabled={busy} onClick={recordSnapshot}>{busy ? "기록 중…" : "지금 스냅샷 기록"}</button>
+              {snapMsg && <span className="muted" style={{ marginLeft: 10 }}>{snapMsg}</span>}
+            </div>
           </>
         );
       }}</Async>

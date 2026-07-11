@@ -4,8 +4,9 @@ import { mkdtemp, mkdir, writeFile, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  computeConfigHash, computeHarnessScorecard, writeHarnessScorecardSnapshot, canonicalFindingId,
+  computeConfigHash, computeHarnessScorecard, canonicalFindingId,
 } from "../src/server/adapters/scorecard.js";
+import { writeHarnessScorecardSnapshot } from "../src/server/adapters/scorecard-snapshot.js";
 
 describe("T2 computeConfigHash — 결정성", () => {
   const a = { path: "a", content: "x" }, b = { path: "b", content: "y" };

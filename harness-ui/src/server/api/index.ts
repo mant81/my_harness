@@ -12,6 +12,7 @@ import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapt
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
 import { computeHarnessScorecard } from "../adapters/scorecard.js";
+import { writeHarnessScorecardSnapshot, readHarnessTrend } from "../adapters/scorecard-snapshot.js";
 import { docsTree } from "../adapters/docs.js";
 import { RunsQuery } from "../schemas.js";
 import { z } from "zod";
@@ -537,6 +538,22 @@ export function registerApi(
   app.get("/api/overview/state-stats", async () => stateStats(projectRoot));
   // 구성 자기평가 계층A(harness_scorecard) — Eval 화면 패널. 정적·읽기전용·결정적(now=만료판정용).
   app.get("/api/eval/harness-scorecard", async () => computeHarnessScorecard(projectRoot, { now: new Date().toISOString().slice(0, 10) }));
+  // M-C 추세(읽기·summary.jsonl 파생·GET 비오염).
+  app.get("/api/eval/harness-scorecard/trend", async () => readHarnessTrend(projectRoot));
+  // M-C 스냅샷 기록(명시 점검 cadence). 무본문 허용·초과 필드 거부·in-flight 429·_workspace/evals 만 write(정의 파일 불변).
+  let snapshotInFlight = false;   // HTTP 레벨 in-flight gate(codex — compute 포함 전체 직렬화·동시 POST 즉시 429)
+  app.post("/api/eval/harness-scorecard/snapshot", async (req, reply) => {
+    const parsed = z.object({}).strict().safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: "unexpected-body" });
+    if (snapshotInFlight) return reply.code(429).send({ error: "snapshot-in-progress" });
+    snapshotInFlight = true;
+    try {
+      const sc = await computeHarnessScorecard(projectRoot, { now: new Date().toISOString().slice(0, 10) });
+      const r = await writeHarnessScorecardSnapshot(sc, projectRoot, new Date().toISOString());
+      if (r.skipped === "contention") return reply.code(429).send({ error: "snapshot-in-progress" });
+      return { written: r.written, state_key: r.state_key };
+    } finally { snapshotInFlight = false; }
+  });
   app.get("/api/settings", async () => settings(projectRoot));
 
   // F3(M11·A68~A71·A99·A101): projectRoot 편집. **mutating** → security.ts onRequest 훅이 Host/Origin/token
