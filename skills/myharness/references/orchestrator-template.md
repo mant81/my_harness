@@ -23,6 +23,7 @@
 ---
 name: {domain}-orchestrator
 description: "{도메인} 에이전트 팀을 조율하는 오케스트레이터. {초기 실행 키워드}. 후속 작업: {도메인} 결과 수정, 부분 재실행, 업데이트, 보완, 다시 실행, 이전 결과 개선 요청 시에도 반드시 이 스킬을 사용."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(오케스트레이터 필수). references/harness-scorecard.md
 ---
 
 # {Domain} Orchestrator
@@ -176,6 +177,7 @@ description: "{도메인} 에이전트 팀을 조율하는 오케스트레이터
 ---
 name: {domain}-orchestrator
 description: "{도메인} 에이전트를 조율하는 오케스트레이터. {초기 실행 키워드}. 후속 작업 키워드 포함."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(필수). references/harness-scorecard.md
 ---
 
 ## 실행 모드: 서브 에이전트
@@ -229,6 +231,7 @@ Phase마다 다른 실행 모드를 사용한다. 각 Phase 상단에 `**실행 
 ---
 name: {domain}-orchestrator
 description: "{도메인} 오케스트레이터 (하이브리드). {키워드}. 후속 작업 키워드 포함."
+orchestrates: [{agent-1}, {agent-2}]   # 구성 자기평가 연결 계약(필수). references/harness-scorecard.md
 ---
 
 ## 실행 모드: 하이브리드
@@ -363,6 +366,7 @@ wait   # 여러 개 띄운 뒤
 
 **promote = git staging (커스텀 mv 금지)**
 - 산출물을 처음부터 `docs/{project}/`에 쓰되, **게이트 통과분만 `git add`/commit.** 여기서 "게이트" = 적용되는 검증 — 외부 리뷰어 있으면 external-review-loop, **없으면 내부 QA**(외부 도구 강제 아님). 미검증·실패분은 워킹트리에 남되 commit 안 함(원장 미오염). 순서: 기록→게이트→**check-artifacts**→승인→커밋(external-review-loop Step 7).
+- **⚠ 자기평가(loop_scorecard) 배선 — 오케스트레이터가 놓치기 쉬운 측정 꼬리:** 외부 리뷰를 돌릴 때 판정을 **산문(메시지)으로만 적지 말고** `_workspace/reviews/{stageID}_verdicts.json` 원장에 기록하고, **루프 종료 시 반드시 `build-scorecard.sh {stageID}_verdicts.json _workspace/evals/external-review/{stageID}/scorecard.json` 실행**(external-review-loop Step 7·정본 §루프 종료). 이걸 건너뛰면 `loop_scorecard`·`summary.jsonl`이 0건이 되어 **Phase 7 자기개선 추세·자기평가 UI가 공백**이 된다(측정·기록만·자동 흐름 변경 없음·jq 없으면 graceful skip). 결과서 "외부리뷰 반영"에 scorecard digest(verdict_counts·alignment_score·regression_catch_rate) 포함.
 
 **강제장치 = check-artifacts + pre-commit hook (프롬프트 강제 금지)**
 - `scripts/check-artifacts.sh <docs_dir> [tier]` — 결과서가 `docs/{project}/working_history/`에 실제 기록됐는지 + `## 다음 단계 참조` 블록(빈/스텁 false-pass 차단) 검증. 끝줄 `ARTIFACTS: ok | missing:<사유>`(항상 exit 0 — 상태는 끝줄로만, 파이프 안전). T0/Tμ = PASS(무마찰).

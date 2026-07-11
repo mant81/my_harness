@@ -243,6 +243,17 @@ myharness は Claude Code エージェントエコシステムの **メタファ
 | [LangGraph](https://langchain-ai.github.io/langgraph/) | 状態グラフのオーケストレーション、LLM 非依存 | 異なるトラック。LangGraph＝長時間実行・状態復旧、myharness＝Claude Code ネイティブの高速なチーム設計 |
 | [wshobson/agents](https://github.com/wshobson/agents) | サブエージェント／スキルのカタログ | 部品供給 ↔ ファクトリー。カタログから部品を選び、myharness が設計したチームに取り込む |
 
+## コンパニオン: My Harness Web
+
+ビルド済みハーネスを **観測・制御** するローカル Web パネル。`_workspace/runs/**` のファイル状態を読み、インベントリ・実行・履歴・ドキュメント・drift・評価を 1 画面に集約します — CLI では一目で見えないもの。
+
+- **実行：** `cd harness-ui && npm install && npm start` — ビルド後 `127.0.0.1:5174` を単一オリジンで配信し、ワンタイム（fragment）トークンのリンクでブラウザを開く。開発：`npm run dev`。
+- **画面（グループサイドバー）：** Overview · New Run / History · Agents / Skills / Context · Docs · Drift / Ops / Eval · Settings。フロー：New Run → run 生成 → History で観測（fire-and-observe）。
+- **セキュリティ・範囲：** ローカル 127.0.0.1 のみ · トークン bootstrap → セッション · 読み取り優先（mutating は定義編集・projectRoot・評価 config のみ — ホワイトリスト・アトミック・既定 off ゲート）。履歴・統計は **UI で実行した run のみ** 反映、ターミナル CLI 実行は v0.7（CLI セッションログ観測）まで範囲外。
+- **ドキュメント：** [`docs/harness-ui/`](docs/harness-ui/README.md) — v0.5（正本コア）· v0.6（収束・実装）· v0.7（企画）。アプリパッケージ：[`harness-ui/`](harness-ui/README.md)。
+
+> ファクトリーとは区別されるサブプロジェクト：ファクトリーはハーネスを *生成* し、My Harness Web は 1 つを *運用* します。自身のバージョンライン（v0.5/0.6）は上記のファクトリーバージョンとは別です。
+
 ## 要件
 
 - **Claude Code：** [エージェントチームの有効化](https://code.claude.com/docs/en/agent-teams) — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`

@@ -231,6 +231,7 @@ Phase별로 다른 전문가 조합이 필요하면, 이전 팀의 산출물을 
 ---
 name: agent-name
 description: "1-2문장 역할 설명. 트리거 키워드 나열."
+skills: [사용-스킬-1, 사용-스킬-2]   # 구성 자기평가 연결 계약(필수). 미선언=link_unknown·빈배열 []=명시 무연결(orphan). references/harness-scorecard.md
 ---
 
 # Agent Name — 역할 한줄 요약
