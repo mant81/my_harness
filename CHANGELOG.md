@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-12
+
+관측·통제 컴패니언 웹 앱 **My Harness Web** 도입(v0.5 코어~v0.6 전기능·Mintlify 개편)과 **자기평가 config-centric 재정향**(하네스 구성상태 개선 중심)이 주축. 각 마일스톤·기능은 codex+agy 외부감사(러너 claude 제외)로 라운드별 HIGH 0 수렴.
+
+### Added
+
+- **My Harness Web (harness-ui) — v0.5 코어 (M1~M6, CERTIFIED)** — 하네스 실행을 관찰·통제하는 로컬 웹 앱. read API·runs reader·schema(M1), supervisor 코어(서명 레지스트리·구조화 로그 ingest·원자 쓰기, M2), OS 어댑터(identity·3중검증 kill·트리 종료, M3), 서버측 보안(auth 게이트·artifact 서빙·drift·state-stats, M4), 실행 인증(superviseRun·CLI 계약, M5), 런처(첫 실행 bootstrap·동의 게이트·fragment 토큰, M6). React 8화면 + 3-OS CI + e2e.
+- **harness-ui v0.6 전기능 (M7~M15, F2~F10)** — Runs 조회/필터/검색(F4)·문서/artifact 뷰어(F5)·관측성 계층 B(F6)·에이전트 프리필 New Run(F2)·projectRoot 편집(F3)·정의 편집기(F7, 첫 mutating)·Eval 대시보드(F8)·Docs 소스 다중설정(F9)·하네스 컨텍스트 관리+빌더/멀티런타임 읽기(F10). 수용기준 A47~A130.
+- **자기평가 config-centric 재정향** — 자기평가를 "외부 리뷰 루프 효율"에서 **"하네스 구성상태 개선"**으로 전환. `harness_scorecard`(계층A 정적 SSOT `computeHarnessScorecard` + 계층B LLM 진단 fail-open), 상호배타 결함 분류(orphan/link_unknown/dead_link/coverage_gap), frontmatter 연결 계약(`skills:`/`orchestrates:`). 상태변화 시에만 append하는 추세 스냅샷(state_key·하드링크 lockfile·TTL 재확보)·추세 read/판정. 채택단계 게이트(측정→검토→제안→잠금 + 에이전트 권고→사람 결정 승인·echo-chamber/recall-null counterSignals).
+- **#/build → Harness 재구성 + 하네스 전체 자동빌드** — Build를 구성 중심으로 재편: config-change 원장·하네스 리스트(오케스트레이터→에이전트 파생)·History를 구성변경 기록으로. **C 자동빌드**: 도메인 한 문장→팩토리가 오케스트레이터+에이전트+스킬 초안(no-tools isolated exec·디스크 미기록)→사람 create. balanced-brace JSON 추출·last-wins·leaf-first 멱등 생성. no-auto-apply backstop.
+- **Mintlify 디자인 개편 + 단일 오리진 서빙** — My Harness Web·라이트 우선+다크·그룹 사이드바·마스터디테일·`npm start` 원커맨드 런처.
+- **v0.7 기획** — F-CLI 세션 로그 관측(터미널 CLI 실행 가시화·프라이버시 옵트인·벤더포맷 fail-soft). PRD+설계.
+- **README 3개국어 컴패니언 섹션 + 앱/인덱스 README**.
+
+### Changed
+
+- **loop_scorecard 측정 꼬리 복구 배선** — 외부 리뷰 루프를 raw audit로만 돌리면 verdicts.json→build-scorecard→summary.jsonl 측정 꼬리를 건너뛰어 loop 통계가 0으로 남던 문제. 오케스트레이터가 루프 종료 후 측정 꼬리를 잇도록 명시(SKILL.md·external-review-loop.md) + `emit-loop-scorecard.sh` 원커맨드 래퍼.
+- **자기평가 정본 배선 (M-B)** — `harness_scorecard` 주축·frontmatter 연결 계약을 팩토리 정본에 전파. stabilizer 게이트로 정본 변경 안정화.
+
+### Fixed
+
+- **A35 고아 오탐 버그** — 계층A가 실제로는 연결된 에이전트를 고아로 오분류하던 버그 해소(실 레포 오탐 0).
+- **하네스 자동빌드 외부감사 R1~R7 수렴** — fence 정규식이 content 내부 markdown 코드펜스에서 절단→balanced-brace 스캔 교체, 부분실패 재시도 교착→409 멱등 skip 분리, prefix-brace false-negative→후보 순회 last-wins. R6·R7 양엔진 no-high 2연속.
+- **CI 환경/플랫폼 강건화** — clean checkout(CI)의 gitignored `.claude/` 부재·projects-home 기준 차이·Windows POSIX 테스트 결합(chmod·O_NOFOLLOW·junction·프로세스 타이밍) 대응. 3-OS(ubuntu/macos/windows × node 20/22) CI 전건 green.
+
 ## [1.3.0] - 2026-07-05
 
 ### Added
