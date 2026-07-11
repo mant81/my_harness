@@ -60,6 +60,16 @@ body { margin:0; font:14px/1.55 var(--sans); background:var(--bg); color:var(--f
 .navlink.on { background:var(--accent-wash); color:var(--accent-ink); font-weight:600; }
 .navlink.disabled { color:var(--faint); opacity:.6; cursor:not-allowed; }
 .navlink .tail { margin-left:auto; font-size:11px; color:var(--faint); font-variant-numeric:tabular-nums; }
+.navlink .ico { flex:none; color:var(--faint); }
+.navlink:hover .ico { color:var(--fg-2); }
+.navlink.on .ico { color:var(--accent-ink); }
+/* 사이드바 검색(시안: 🔍 검색 ⌘K) */
+.navsearch { display:flex; align-items:center; gap:8px; margin:2px 2px 6px; padding:7px 10px; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+.navsearch:focus-within { border-color:var(--accent); }
+.navsearch-ico { flex:none; color:var(--faint); }
+.navsearch input { flex:1; min-width:0; border:none; background:none; outline:none; font:inherit; font-size:13px; color:var(--fg); }
+.navsearch input::placeholder { color:var(--faint); }
+.navsearch kbd { flex:none; font:inherit; font-size:10.5px; color:var(--faint); border:1px solid var(--line); border-radius:5px; padding:1px 5px; background:var(--panel-2); }
 
 /* ---------- main + topbar ---------- */
 .main { display:flex; flex-direction:column; min-width:0; }
@@ -70,6 +80,7 @@ body { margin:0; font:14px/1.55 var(--sans); background:var(--bg); color:var(--f
 .topbar .spacer { flex:1; }
 .statuspill { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:500; padding:4px 10px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--fg-2); }
 .statuspill .dot { width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 3px var(--ok-wash); }
+.statuspill .host { color:var(--faint); font-variant-numeric:tabular-nums; }
 .iconbtn { width:32px; height:32px; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--fg-2); display:grid; place-items:center; cursor:pointer; }
 .iconbtn:hover { background:var(--panel-2); color:var(--fg); }
 

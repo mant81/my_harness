@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { Overview, Build, Agents, Skills, Context, Runs, Docs, Drift, Ops, Eval, Settings } from "./screens.js";
 import { probeConnection } from "./api.js";
 import { useApi } from "./ui.js";
+import { Icon } from "./icons.js";
 import type { DocsSourcesList } from "./api.js";
 import { nextConn, showsReconnecting, backoffMs, READY_POLL_MS, type ConnPhase } from "./connection.js";
 
@@ -98,10 +99,20 @@ export function App() {
   const idOf = () => location.hash.replace(/^#\/?/, "").split("?")[0] || "overview";
   const [cur, setCur] = useState<string>(idOf);
   const [theme, setTheme] = useState<Theme>(initTheme);
+  const [q, setQ] = useState("");   // 사이드바 검색(nav 라벨 필터)
   const phase = useConnection();
   // A118: docsMenuEnabled=false → 사이드바 Docs 비활성+이유 툴팁. 로드 전엔 활성 가정(플리커 방지). 실패해도 기본 활성.
   const docsSources = useApi<DocsSourcesList>("/api/docs/sources");
   const docsEnabled = docsSources.data?.enabled ?? true;
+  // 사이드바 카운트(시안: Agents·Skills·Drift). 경량 조회 — 셸 1회.
+  const stats = useApi<{ configHealth: { agents: number; skills: number } }>("/api/overview/state-stats");
+  const drift = useApi<{ findings: unknown[] }>("/api/drift");
+  const tail: Record<string, React.ReactNode> = {
+    build: "Build",
+    agents: stats.data?.configHealth.agents,
+    skills: stats.data?.configHealth.skills,
+    drift: drift.data?.findings.length,
+  };
   useEffect(() => {
     const on = () => setCur(idOf());
     window.addEventListener("hashchange", on);
@@ -121,20 +132,36 @@ export function App() {
           <span className="brand-mark" aria-hidden="true">H</span>
           <span className="brand-name">My Harness Web<span className="ver">v0.6 · local</span></span>
         </div>
-        {GROUPS.map((g) => (
-          <div key={g.label} className="navgroup">
-            <div className="glabel">{g.label}</div>
-            {g.ids.map((id) => {
-              const s = byId(id);
-              // A81/A118: Docs 메뉴 off → 비활성 링크(이유 툴팁·클릭 무효). 빈 disabled 금지 = 사유 명시.
-              if (s.id === "docs" && !docsEnabled) return (
-                <span key={s.id} className="navlink disabled" aria-disabled="true"
-                  title="Docs 메뉴가 꺼져 있습니다 · Settings → Docs 소스에서 켜세요">{s.label}</span>
-              );
-              return <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>{s.label}</a>;
-            })}
-          </div>
-        ))}
+        <div className="navsearch">
+          <Icon name="search" className="navsearch-ico" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" aria-label="화면 검색" spellCheck={false} />
+          <kbd>⌘K</kbd>
+        </div>
+        {GROUPS.map((g) => {
+          const ids = g.ids.filter((id) => !q || byId(id).label.toLowerCase().includes(q.toLowerCase()));
+          if (ids.length === 0) return null;   // 검색 필터로 빈 그룹 숨김
+          return (
+            <div key={g.label} className="navgroup">
+              <div className="glabel">{g.label}</div>
+              {ids.map((id) => {
+                const s = byId(id);
+                // A81/A118: Docs 메뉴 off → 비활성 링크(이유 툴팁·클릭 무효). 빈 disabled 금지 = 사유 명시.
+                if (s.id === "docs" && !docsEnabled) return (
+                  <span key={s.id} className="navlink disabled" aria-disabled="true"
+                    title="Docs 메뉴가 꺼져 있습니다 · Settings → Docs 소스에서 켜세요">
+                    <Icon name={s.id} /><span>{s.label}</span>
+                  </span>
+                );
+                return (
+                  <a key={s.id} href={`#/${s.id}`} className={s.id === active.id ? "navlink on" : "navlink"}>
+                    <Icon name={s.id} /><span>{s.label}</span>
+                    {tail[s.id] != null && <span className="tail">{tail[s.id]}</span>}
+                  </a>
+                );
+              })}
+            </div>
+          );
+        })}
       </nav>
       <main className="main">
         <header className="topbar">
@@ -142,10 +169,10 @@ export function App() {
             <span>My Harness Web</span><span className="sep">/</span><span className="cur">{active.label}</span>
           </nav>
           <div className="spacer" />
-          <span className="statuspill"><span className="dot" />{phase === "ready" ? "연결됨" : "재연결 중"}</span>
+          <span className="statuspill"><span className="dot" />{phase === "ready" ? "연결됨" : "재연결 중"}<span className="host">· {location.host || "localhost:5174"}</span></span>
           <button className="iconbtn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             title="테마 전환" aria-label="라이트/다크 테마 전환">
-            {theme === "dark" ? "☀" : "☾"}
+            <Icon name={theme === "dark" ? "sun" : "moon"} />
           </button>
         </header>
         <div className="body"><Body /></div>

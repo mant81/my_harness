@@ -17,6 +17,16 @@ describe("M4 라우트 (보안 미주입 단위)", () => {
     const r = await app.inject({ method: "POST", url: "/api/drift/sync-plan" });
     expect(r.json().mutates).toBe(false);
   });
+  it("harness-scorecard: Eval 패널 라우트 구조(계층A)", async () => {
+    const r = await app.inject({ url: "/api/eval/harness-scorecard" });
+    expect(r.statusCode).toBe(200);
+    const b = r.json();
+    expect(b.schema_version).toBe(1);
+    expect(Array.isArray(b.findings)).toBe(true);
+    expect(b.config_hash).toMatch(/^[0-9a-f]{32}$/);
+    expect(b.counts).toHaveProperty("orphan");
+    expect(b.diag).toBeNull(); // 계층B 미호출(fail-open)
+  });
   it("A35-A38: state-stats 구조", async () => {
     const r = await app.inject({ url: "/api/overview/state-stats" });
     const b = r.json();

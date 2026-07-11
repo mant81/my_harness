@@ -11,6 +11,7 @@ import {
 import { listRuns, getRun, readEvents, readRunAgents, queryRuns } from "../adapters/runs.js";
 import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
+import { computeHarnessScorecard } from "../adapters/scorecard.js";
 import { docsTree } from "../adapters/docs.js";
 import { RunsQuery } from "../schemas.js";
 import { z } from "zod";
@@ -534,6 +535,8 @@ export function registerApi(
 
   // overview 상태·통계(A35-A38) + settings
   app.get("/api/overview/state-stats", async () => stateStats(projectRoot));
+  // 구성 자기평가 계층A(harness_scorecard) — Eval 화면 패널. 정적·읽기전용·결정적(now=만료판정용).
+  app.get("/api/eval/harness-scorecard", async () => computeHarnessScorecard(projectRoot, { now: new Date().toISOString().slice(0, 10) }));
   app.get("/api/settings", async () => settings(projectRoot));
 
   // F3(M11·A68~A71·A99·A101): projectRoot 편집. **mutating** → security.ts onRequest 훅이 Host/Origin/token
