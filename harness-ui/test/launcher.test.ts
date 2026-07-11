@@ -78,7 +78,8 @@ describe("런처 (A30-A34)", () => {
 
 import { chmod, stat as fsstat, writeFile as wf } from "node:fs/promises";
 describe("writeBootstrap 권한 실증(A34 보강)", () => {
-  it("기존 0644 파일도 write 후 0600(chmod-first)", async () => {
+  // POSIX 퍼미션 모델 전용 — Windows 는 ACL 기반이라 mode 비트 무의미(win32 skip).
+  (process.platform === "win32" ? it.skip : it)("기존 0644 파일도 write 후 0600(chmod-first)", async () => {
     const { bootstrapPath, writeBootstrap } = await import("../src/server/launcher.js");
     await wf(bootstrapPath(), "old").catch(() => {});
     await chmod(bootstrapPath(), 0o644).catch(() => {});

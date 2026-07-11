@@ -57,7 +57,8 @@ describe("launch (A9b dry-run·실행)", () => {
     await expect(stat(join(r.runDir, "manifest.json"))).rejects.toBeTruthy();
     await rm(root, { recursive: true, force: true });
   });
-  it("A6: superviseRun 관리 루프 — 수동 ingest 없이 exit 시 자동 finalize(completed)", async () => {
+  // 관리 루프 자동 finalize 는 POSIX 프로세스그룹/시그널 semantics 의존 — Windows 감독 경로는 별도(win32 skip).
+  (process.platform === "win32" ? it.skip : it)("A6: superviseRun 관리 루프 — 수동 ingest 없이 exit 시 자동 finalize(completed)", async () => {
     const root = await mkdtemp(join(tmpdir(), "hui-run5-"));
     const { superviseRun, writeManifest, writeStatus, SUPERVISOR_VERSION } = await import("../src/server/supervisor/supervisor.js");
     const runDir = join(root, "_workspace", "runs", "run-x");

@@ -69,9 +69,9 @@ describe("validateProjectRoot D1~D8 (F3-root)", () => {
 
   it("D4: 시스템 경로(/etc) → denied-system-path", async () => {
     const v = await validateProjectRoot("/etc", ph);
-    // 거부 보장이 핵심 — 정확 코드는 env(projects-home 기준)에 따라 denied-system-path|outside-projects-home.
+    // 거부 보장이 핵심 — 정확 코드는 env·플랫폼에 따라 상이(POSIX: denied-system-path|outside-projects-home / Windows: /etc 비유효 → bad-input).
     expect(v).toMatchObject({ ok: false });
-    expect(["denied-system-path", "outside-projects-home"]).toContain((v as { error?: string }).error);
+    expect(["denied-system-path", "outside-projects-home", "bad-input"]).toContain((v as { error?: string }).error);
   });
 
   it("D4: 홈 직속 dotdir(~/.secretX) → denied-system-path", async () => {
@@ -132,9 +132,9 @@ describe("validateProjectRoot D1~D8 (F3-root)", () => {
     const jPath = join(ph, "jun");
     await symlink(jTarget, jPath, "junction"); // win32 junction
     const v = await validateProjectRoot(jPath, ph);
-    // reparse-point(D3 readlink 감지) 또는 out-root면 outside-projects-home(D2 최후방어) — 둘 다 닫힘
+    // 거부 보장이 핵심 — reparse-point(D3 readlink) | symlink(junction을 심링크로 감지) | outside-projects-home(D2 최후방어) 모두 닫힘.
     expect(v.ok).toBe(false);
-    if (!v.ok) expect(["reparse-point", "outside-projects-home"]).toContain(v.error);
+    if (!v.ok) expect(["reparse-point", "symlink", "outside-projects-home"]).toContain(v.error);
     await rm(jTarget, { recursive: true, force: true });
   });
 });

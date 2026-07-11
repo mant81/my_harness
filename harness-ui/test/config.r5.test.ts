@@ -72,7 +72,8 @@ describe("config strict RMW open 실패 봉쇄(기존 config 미교체 · F3.7 R
     expect(await readFile(configPath(), "utf8")).toBe(existing);
   });
 
-  it("R5(b): 심링크 config(O_NOFOLLOW→ELOOP) → strict updateConfig throw·타겟 원문 무변경", async () => {
+  // O_NOFOLLOW/ELOOP 심링크 거부는 POSIX 전용 semantics — Windows 는 동작 상이(win32 skip).
+  (process.platform === "win32" ? it.skip : it)("R5(b): 심링크 config(O_NOFOLLOW→ELOOP) → strict updateConfig throw·타겟 원문 무변경", async () => {
     // config.json 을 심링크로 만들면 O_NOFOLLOW open 이 ELOOP 로 실패(실 fs 동작·mock 불필요).
     const target = join(stateDir, "real-config.json");
     const orig = JSON.stringify({ schemaVersion: "1", definitionEditEnabled: true, evals: { threshold: 0.7 } });

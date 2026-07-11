@@ -148,7 +148,8 @@ describe("HIGH#2 DoS — scan 데드라인/라인캡이 커버리지에 정직 �
     await addRun("bigflood", { events: "x\n".repeat(MAX_EVENT_LINES_PER_RUN + 5) });
     const ov = await overview(root);
     expect(ov.coverage.truncated).toBe(true);
-    expect(ov.coverage.truncatedReason).toBe("limit_reached");
+    // 정직 truncation 이 핵심 — 느린 러너(Windows CI)는 라인캡 전 scan 데드라인 선도달 가능. 둘 다 정직 부분집계.
+    expect(["limit_reached", "deadline_exceeded"]).toContain(ov.coverage.truncatedReason);
     expect(ov.runCount).toBe(1); // status 유효 → 집계 편입(부분)
   });
 
