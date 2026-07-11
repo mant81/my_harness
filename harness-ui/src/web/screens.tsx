@@ -125,55 +125,7 @@ function MetricsWindowBar({ win, onChange }: { win: MetricsWindow; onChange: (w:
   );
 }
 
-// W2 Overview 효과성 카드(A63·A91) — 독립 로딩(W9/A83: metrics/overview 실패가 Overview 전체 미붕괴).
-function EffectivenessCard() {
-  const [win, setWin] = useState<MetricsWindow>(DEFAULT_WINDOW);
-  // U3: 경로는 window 변경 시에만 재계산 — nowMs 를 useMemo 안에서 캡처(deps:[win]) → 매 렌더 refetch 루프 방지.
-  const path = useMemo(() => metricsPath("/api/metrics/overview", win, Date.now()), [win]);
-  const m = useApi<OverviewMetrics>(path);
-  return (
-    <Card title="효과성 지표 (실행 관측 기반)">
-      <MetricsWindowBar win={win} onChange={setWin} />
-      <Async state={m}>{(d) => <OverviewMetricsBody m={d} />}</Async>
-    </Card>
-  );
-}
-
-function OverviewMetricsBody({ m }: { m: OverviewMetrics }) {
-  const suggestions = overviewSuggestions(m);
-  return (
-    <>
-      {/* 계층 A 요약(progressive disclosure) — 핵심 지표만 한 줄, 상세는 접기 */}
-      <div className="metric-summary">
-        <span>총 run <b>{m.runCount}</b></span>
-        <span>성공률 <MetricCell mv={m.successRate} fmt="percent" /></span>
-        <span>실패율 <MetricCell mv={m.failureRate} fmt="percent" /></span>
-        <span>미관측 에이전트 <b>{m.unusedAgents}</b> · 스킬 <b>{m.unusedSkills}</b></span>
-      </div>
-      {/* W5 anti-Goodhart: 측정 → 행동유도 제안(순위/점수/자동강제 없음) */}
-      {suggestions.length > 0 && (
-        <ul className="suggestions" aria-label="관측 기반 제안(자동 조치 아님)">
-          {suggestions.map((s) => <li key={s.key}>💡 {s.text}</li>)}
-        </ul>
-      )}
-      {/* 계층 B 상세 접기(A91 과밀 방지) */}
-      <details className="tier-b">
-        <summary>상세 지표 (신뢰도 배지 동반)</summary>
-        <Table cols={["지표", "값", "산정 근거"]} rows={[
-          ["성공률", <MetricCell mv={m.successRate} fmt="percent" />, "status.state 직접 관측"],
-          ["실패율", <MetricCell mv={m.failureRate} fmt="percent" />, "status.state 직접 관측"],
-          ["평균 소요", <MetricCell mv={m.avgDurationMs} fmt="duration" />, "createdAt→updatedAt"],
-          ["재작업률", <MetricCell mv={m.reworkRate} fmt="percent" />, "이벤트명 프록시(추정)"],
-          ["리뷰 수렴(run당)", <MetricCell mv={m.reviewConvergence} fmt="float" />, "review 이벤트 평균(추정)"],
-          ["총 토큰", <MetricCell mv={m.totalTokens} fmt="int" />, "events.usage 실존 시 측정·부재 시 미귀속"],
-        ]} />
-      </details>
-      <CoverageNote cov={m.coverage} />
-    </>
-  );
-}
-
-// ── 1. Overview (A2·A3·A35-A38 · F6 W2 효과성 카드) ──
+// ── 1. Overview (A2·A3·A35-A38) ──
 export function Overview() {
   const inv = useApi<Inv>("/api/harness");
   const rt = useApi<Rt>("/api/runtimes");
@@ -181,8 +133,6 @@ export function Overview() {
   return (
     <div className="screen">
       <h2>Overview</h2>
-      {/* F6 W2: 효과성 카드는 자체 metrics/overview 페치로 독립 로딩(W9/A83 — 실패해도 아래 카드 미붕괴) */}
-      <EffectivenessCard />
       <Async state={rt}>{(r) => (
         <Card title="런타임">
           <Table cols={["런타임", "설치", "버전"]} rows={Object.entries(r).map(([k, v]) => [
