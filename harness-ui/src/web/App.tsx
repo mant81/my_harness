@@ -9,11 +9,11 @@ import { nextConn, showsReconnecting, backoffMs, READY_POLL_MS, type ConnPhase }
 
 const SCREENS = [
   { id: "overview", label: "Overview", C: Overview },
-  { id: "build", label: "New Run", C: Build },   // RF1: "Build" 표시 라벨 → "New Run"(하네스 빌드 혼동 제거)
+  { id: "build", label: "Harness", C: Build },   // 하네스 빌드 허브(목록 + 정의 빌더) — id 는 딥링크 보존
   { id: "agents", label: "Agents", C: Agents },
   { id: "skills", label: "Skills", C: Skills },
   { id: "context", label: "Context", C: Context },
-  { id: "runs", label: "History", C: Runs },   // 그룹 "실행" 하위 — New Run(시작) ↔ History(과거 실행 기록). id 는 딥링크 보존
+  { id: "runs", label: "History", C: Runs },   // 구성 변경 이력(추가/수정/삭제) — id 는 딥링크 보존
   { id: "docs", label: "Docs", C: Docs },
   { id: "drift", label: "Drift", C: Drift },
   { id: "ops", label: "Ops", C: Ops },
@@ -24,8 +24,7 @@ const SCREENS = [
 // RF6: 사이드바 그룹화(실행/정의/문서/점검/설정) — 평면 나열보다 역할군을 시각화.
 const GROUPS: { label: string; ids: string[] }[] = [
   { label: "개요", ids: ["overview"] },
-  { label: "실행", ids: ["build", "runs"] },
-  { label: "정의", ids: ["agents", "skills", "context"] },
+  { label: "구성·빌드", ids: ["build", "agents", "skills", "context", "runs"] },
   { label: "문서", ids: ["docs"] },
   { label: "점검", ids: ["drift", "ops", "eval"] },
   { label: "설정", ids: ["settings"] },
@@ -108,7 +107,6 @@ export function App() {
   const stats = useApi<{ configHealth: { agents: number; skills: number } }>("/api/overview/state-stats");
   const drift = useApi<{ findings: unknown[] }>("/api/drift");
   const tail: Record<string, React.ReactNode> = {
-    build: "Build",
     agents: stats.data?.configHealth.agents,
     skills: stats.data?.configHealth.skills,
     drift: drift.data?.findings.length,

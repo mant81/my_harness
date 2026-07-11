@@ -4,16 +4,16 @@ import type { JSX } from "react";
 const P: Record<string, JSX.Element> = {
   // Overview — layout-grid(2×2)
   overview: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /></>,
-  // New Run — play(outline triangle)
-  build: <polygon points="6 4 19 12 6 20 6 4" />,
+  // Harness — boxes(오케스트레이터+에이전트 묶음)
+  build: <><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="m3.3 7 8.7 5 8.7-5" /><path d="M12 22V12" /></>,
   // Agents — user
   agents: <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
   // Skills — hexagon
   skills: <polygon points="12 2 20.5 7 20.5 17 12 22 3.5 17 3.5 7" />,
   // Context — list
   context: <><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3.5" y1="6" x2="3.51" y2="6" /><line x1="3.5" y1="12" x2="3.51" y2="12" /><line x1="3.5" y1="18" x2="3.51" y2="18" /></>,
-  // History/Runs — activity(pulse)
-  runs: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+  // History — 구성 변경 이력(clock-rewind)
+  runs: <><path d="M3 3v5h5" /><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" /><path d="M12 7v5l3 2" /></>,
   // Docs — file-text
   docs: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></>,
   // Drift — shield

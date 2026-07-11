@@ -471,3 +471,75 @@ export async function loopProposal(root: string, loop: string, cfg: EvalsConfigR
     citedScorecards: cited,
   };
 }
+
+// --- 채택 단계 졸업 게이트(현 단계→다음) — 에이전트 분석·추천, 사람 정보결정(자동 승격 아님) ------
+// 교리: 조건 도달=자격일 뿐 자동 상향 아님. 에이전트가 근거+반대신호까지 제시, 사람이 [상향] 클릭(추인 아님·정보결정).
+// 등급: 1→2(저위험·검토만 켬)=autoAdvance 여지 / 2→3(제안 emit)·3→4(자동적용)=사람 결정·3→4 자동 금지.
+export interface GateStatus {
+  stage: 1 | 2 | 3 | 4;
+  nextStage: 2 | 3 | 4 | null;
+  logging: { count: number; required: number; met: boolean };       // 누적 로깅(검증 scorecard 수)
+  adjudicated: { count: number; required: number; met: boolean };   // 누적 판정 수
+  eligible: boolean;                        // 데이터 조건 충족(다음 단계 자격)
+  recommendation: "advance" | "hold" | "locked";
+  reasons: string[];                        // advance 근거 / hold 미충족
+  counterSignals: string[];                 // 반대신호(에코체임버·recall 미측정 — 승격 신중)
+  autoAdvanceEligible: boolean;             // 1→2 저위험 + 조건충족일 때만
+  note: string;
+}
+export async function gateStatus(root: string, cfg: EvalsConfigResolved): Promise<GateStatus> {
+  const reqLog = cfg.thresholds.rollingN.effective;             // 로깅 관측 최소치(기본 10)
+  const reqAdj = cfg.thresholds.minAdjudicatedClaims.effective; // 판정 누적 최소치(기본 30)
+  const stage = cfg.adoptionStage;
+  const nextStage = (stage < 4 ? (stage + 1) as 2 | 3 | 4 : null);
+
+  // 누적 집계(전 loop·검증분·runId dedup) — 졸업은 누적 데이터 기준.
+  const idx = await listEvalLoops(root);
+  const seen = new Set<string>();
+  let logging = 0, adjudicated = 0;
+  const aligns: number[] = []; let gtNull = true;
+  for (const l of idx.loops) {
+    const { runs } = await collectLoop(root, l.loop);
+    for (const r of runs) {
+      if (r.result.kind !== "ok" || !r.result.verified) continue;
+      const key = l.loop + "/" + r.runId;
+      if (seen.has(key)) continue; seen.add(key);
+      logging += 1;
+      const vc = r.result.card.verdict_counts;
+      if (vc) adjudicated += (vc.confirmed ?? 0) + (vc.partial ?? 0) + (vc.deferred ?? 0) + (vc.rejected ?? 0);
+      const a = r.result.card.alignment_score; if (typeof a === "number") aligns.push(a);
+      if (r.result.card.overturned_rejection_rate != null || r.result.card.missed_defect_rate != null) gtNull = false;
+    }
+  }
+  const logMet = logging >= reqLog, adjMet = adjudicated >= reqAdj;
+  const eligible = logMet && adjMet;
+
+  // 반대신호(승격 신중 근거) — 에코체임버·recall 미측정.
+  const counterSignals: string[] = [];
+  if (aligns.length >= 3 && aligns.every((x) => x >= 0.95))
+    counterSignals.push("정합도(alignment)가 거의 만점 — 리뷰어 유휴/에코체임버 가능성. alignment=자기정합도이지 품질 아님, 외부 GT(recall)로 교차검증 권장.");
+  if (gtNull)
+    counterSignals.push("recall 미측정(overturned/missed = GT 없음·null) — 놓친 결함(miss)은 alignment 로 안 보임. seeded 결함·사후 회귀로 보강 전 상향 신중.");
+
+  const reasons: string[] = [];
+  let recommendation: GateStatus["recommendation"];
+  if (stage === 4) { recommendation = "locked"; reasons.push("단계 4=잠금(표시 전용) — 상향 없음."); }
+  else if (stage === 3) {
+    recommendation = "hold";
+    reasons.push("3→4(자동 적용)는 데이터로 권고하지 않음 — 승인 사다리·수동 결정 필수(자동 상향 금지).");
+  } else {
+    recommendation = eligible ? "advance" : "hold";
+    if (!logMet) reasons.push(`로깅 ${logging}/${reqLog} 미달`);
+    if (!adjMet) reasons.push(`판정 누적 ${adjudicated}/${reqAdj} 미달`);
+    if (eligible) reasons.push(`데이터 조건 충족(로깅 ${logging}/${reqLog}·판정 ${adjudicated}/${reqAdj}) — ${nextStage}단계 자격.`);
+  }
+  const autoAdvanceEligible = stage === 1 && eligible; // 1→2 만 저위험(검토만 켬)
+
+  return {
+    stage, nextStage,
+    logging: { count: logging, required: reqLog, met: logMet },
+    adjudicated: { count: adjudicated, required: reqAdj, met: adjMet },
+    eligible, recommendation, reasons, counterSignals, autoAdvanceEligible,
+    note: "조건 충족=자격일 뿐 자동 승격 아님. 에이전트 분석·추천 후 사람이 근거 보고 [상향](추인 아님). 승격은 되돌리기 신중(자동 행동 권한 확대).",
+  };
+}

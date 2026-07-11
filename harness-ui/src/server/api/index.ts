@@ -13,6 +13,8 @@ import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
 import { computeHarnessScorecard } from "../adapters/scorecard.js";
 import { writeHarnessScorecardSnapshot, readHarnessTrend } from "../adapters/scorecard-snapshot.js";
+import { appendConfigChange, readConfigChanges } from "../adapters/confighistory.js";
+import { listHarnesses } from "../adapters/harnesslist.js";
 import { docsTree } from "../adapters/docs.js";
 import { RunsQuery } from "../schemas.js";
 import { z } from "zod";
@@ -22,7 +24,7 @@ import { isSafeSegment, isSafeDocsSegment, ARGV_TOKEN } from "../lib/paths.js";
 import { openSafeFile, sendDownload, sendPreview, DOWNLOAD_MAX, VIEW_MAX, CONTEXT_RENDERABLE_EXT } from "../lib/servefile.js";
 import { contextTree, ensureCreatePath } from "../adapters/context.js";
 import { classifyContextPath, deniedContextPath } from "../lib/contextpaths.js";
-import { BuildDraftInput, draftDefinition, BuildGate, type ExecFn } from "../lib/builddraft.js";
+import { BuildDraftInput, draftDefinition, BuildGate, BuildHarnessInput, draftHarness, type ExecFn } from "../lib/builddraft.js";
 import { safeExec } from "../lib/exec.js";
 import { deniedPath, deniedDocsPath } from "../security.js";
 import { RunRequest, launchRun } from "../exec-run.js";
@@ -34,7 +36,7 @@ import {
   MAX_DOCS_SOURCES, MAX_DOCS_PATH_LEN, MAX_DOCS_LABEL_LEN,
 } from "../lib/docssources.js";
 import { validateProjectRoot, revalidateForPersist } from "../lib/projectroot.js";
-import { listEvalLoops, loopTrend, scorecardDetail, loopProposal } from "../adapters/evals.js";
+import { listEvalLoops, loopTrend, scorecardDetail, loopProposal, gateStatus } from "../adapters/evals.js";
 import { loadEvalsConfig, updateEvalsConfig, EvalsConfigBody } from "../lib/evalsconfig.js";
 
 // PV3: activeRunsWarning 산출. listRuns 재사용(신규 스캐너 금지) → status.json running 카운트.
@@ -74,6 +76,7 @@ export function registerApi(
   app.get("/api/runtimes", async () => detectRuntimes());
 
   app.get("/api/harness", async () => harnessInventory(projectRoot));
+  app.get("/api/harnesses", async () => listHarnesses(projectRoot)); // 하네스 목록(오케스트레이터→에이전트 파생)
 
   // :name 은 논리적 이름(메모리 배열 필터 — FS 접근 아님). 공백 포함 이름 허용, 길이만 제한.
   const okName = (n: string) => n.length > 0 && n.length <= 200;
@@ -179,6 +182,7 @@ export function registerApi(
         // DW3/DW4 경화쓰기(부모 체인 재검증·TOCTOU 스왑 감지). 스왑 등 위반 = fail-closed 400.
         try { await writeDefSafe(projectRoot, r.sourcePath, kind, canon.canonical); }
         catch { return reply.code(400).send({ error: "path-unsafe" }); }
+        await appendConfigChange(projectRoot, { at: new Date().toISOString(), action: "edit", kind, name: req.params.name, runtime: "claude", path: r.sourcePath });
         return {
           ok: true, prevHash, newHash: sha256(canon.canonical), pathId, sourcePath: r.sourcePath,
           codexDriftWarning: true, // DW8/F7.7: Codex 듀얼(.codex/.agents) 피어는 v0.7 비대상 — drift 경고만.
@@ -292,6 +296,20 @@ export function registerApi(
     } finally { buildGate.release(true); }
   });
 
+  // C: 하네스 전체 초안(오케스트레이터+에이전트+스킬 세트). draft 만·디스크 미기록. 생성은 사람 승인 후 build/create 반복.
+  app.post("/api/context/build/harness-draft", async (req, reply) => {
+    if (!(await isEditEnabled())) return reply.code(403).send({ error: "edit-disabled" }); // HB7 fail-closed
+    const parsed = BuildHarnessInput.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const g = buildGate.acquire(true); // HB8 in-flight + 쿨다운(exec spawn)
+    if (!g.ok) return reply.code(429).send({ error: g.reason });
+    try {
+      const r = await draftHarness(parsed.data, buildExec);
+      if (!r.ok) return reply.code(502).send({ error: r.error });
+      return { ok: true, draft: r.draft, applied: false }; // no-auto-apply(표시만·생성은 별 build/create)
+    } finally { buildGate.release(true); }
+  });
+
   // A125·A126·HB5·HB6: 승인 초안 → 신규 정의 생성(신규 구축·F7 저장 전건 통과). `.claude/agents·skills` 스코프만.
   const BuildCreateBody = z.object({
     kind: z.enum(["agent", "skill"]),
@@ -332,6 +350,7 @@ export function registerApi(
         // HB6 저장 = F7 경화 원자쓰기(부모 체인 재검증·TOCTOU 스왑 감지) 재사용.
         try { await writeDefSafe(projectRoot, sourcePath, kind, canon.canonical); }
         catch { return reply.code(400).send({ error: "path-unsafe" }); }
+        await appendConfigChange(projectRoot, { at: new Date().toISOString(), action: "create", kind, name, runtime: "claude", path: sourcePath });
         return { ok: true, created: true, sourcePath, pathId: sha256(sourcePath), newHash: sha256(canon.canonical) };
       });
     } finally { buildGate.release(false); }
@@ -554,6 +573,8 @@ export function registerApi(
       return { written: r.written, state_key: r.state_key };
     } finally { snapshotInFlight = false; }
   });
+  // 하네스 구성 변경 이력(History) — 에이전트/스킬 추가·수정·삭제(UI 발원). 읽기전용.
+  app.get("/api/config-changes", async () => readConfigChanges(projectRoot));
   app.get("/api/settings", async () => settings(projectRoot));
 
   // F3(M11·A68~A71·A99·A101): projectRoot 편집. **mutating** → security.ts onRequest 훅이 Host/Origin/token
@@ -638,6 +659,8 @@ export function registerApi(
   // Part C: config 읽기(GET·side-effect 0)·쓰기(POST·mutating → security.ts Host/Origin/token 자동 게이트).
   //   static 세그먼트 "config" 는 Fastify radix 우선 → `/api/evals/:loop` 파라미터보다 먼저 매칭(loop 오인 없음).
   app.get("/api/evals/config", async () => loadEvalsConfig());
+  // 채택 단계 졸업 게이트(현 단계→다음 자격·근거·반대신호) — 읽기전용. 상향은 config POST(사람 결정).
+  app.get("/api/evals/gate", async () => gateStatus(projectRoot, await loadEvalsConfig()));
   app.post("/api/evals/config", async (req, reply) => {
     const parsed = EvalsConfigBody.safeParse(req.body);
     // adoptionStage:4(union 실패)·floor 미만 임계(.min 실패)·미지 필드(strict) → 400(silent-clamp 아님).

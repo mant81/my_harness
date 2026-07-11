@@ -14,7 +14,7 @@ import {
   postEvalsConfig, EvalsConfigError,
   docsTreePath, docPreviewPath, postDocsSources, DocsSourcesError,
   CONTEXT_TREE_PATH, contextFilePath, downloadContextFile,
-  postBuildDraft, postBuildCreate, BuildError,
+  postBuildDraft, postBuildCreate, postHarnessDraft, BuildError, type HarnessDraftResult,
   type ContextTree as ContextTreeShape, type ContextNode as CtxNode,
   type ContextFilePreview,
   type DocsNode, type DocsTree, type DocPreview,
@@ -173,6 +173,11 @@ export function Overview() {
           </Card>
           <Card title="진화 이력">
             <Table cols={["날짜", "변경", "출처"]} rows={s.evolution.slice(-12).reverse().map((e) => [e.date, e.change, e.source])} />
+            <p className="muted">
+              출처: CLAUDE.md·AGENTS.md 변경이력(팩토리 서술). 최근 12건. ·
+              에이전트/스킬 <b>정의 변경(추가·수정)</b> 상세는 <a className="link" href="#/runs">→ History</a>
+              (별개 로그 — UI 발원 구성 변경 이력).
+            </p>
           </Card>
         </>
       )}</Async>
@@ -181,53 +186,117 @@ export function Overview() {
 }
 
 // ── 2. Build (A9a — dry-run 폼 골격 + 실행) ──
-export function Build() {
-  const [runtime, setRuntime] = useState<"codex" | "claude">("codex");
-  const [mode, setMode] = useState("audit");
+type HarnessEntry = { name: string; runtime: string; orchestratesDeclared: boolean; agents: string[]; missingAgents: string[]; skillCount: number; status: "linked" | "unmigrated" | "broken" };
+const HSTATUS: Record<string, { label: string; kind: "ok" | "warn" | "muted" }> = {
+  linked: { label: "정상", kind: "ok" }, unmigrated: { label: "미선언", kind: "muted" }, broken: { label: "대상 부재", kind: "warn" },
+};
+
+// 하네스 목록 — 오케스트레이터 스킬 + 배정 에이전트(연결 그래프 파생). backfill(orchestrates 선언) 전엔 "미선언".
+function HarnessList() {
+  const st = useApi<{ harnesses: HarnessEntry[] }>("/api/harnesses");
+  return (
+    <Card title="하네스 목록">
+      <p className="muted">하네스 = 오케스트레이터 스킬 + 배정 에이전트/스킬(연결 그래프 파생). <code>orchestrates:</code> 선언 시 "정상", 미선언(추정)은 backfill 필요.</p>
+      <Async state={st}>{(d) => d.harnesses.length === 0 ? (
+        <div className="empty" role="status"><p className="muted">🧪 오케스트레이터 스킬이 없습니다 — 하네스 미구성.</p></div>
+      ) : (
+        <Table cols={["하네스(오케스트레이터)", "런타임", "에이전트", "스킬", "상태"]} rows={d.harnesses.map((h) => [
+          h.name, h.runtime, `${h.agents.length}${h.missingAgents.length ? ` (+부재 ${h.missingAgents.length})` : ""}`,
+          String(h.skillCount), <Badge kind={HSTATUS[h.status]?.kind ?? "muted"}>{HSTATUS[h.status]?.label ?? h.status}</Badge>,
+        ])} />
+      )}</Async>
+    </Card>
+  );
+}
+
+// C: 하네스 전체 자동 빌드 — 도메인 한 문장 → 팩토리 exec(격리·무도구·plan) 로 세트 초안 → 검토 → 전체 생성(build/create 반복·자동적용 없음).
+function HarnessAutoBuild({ gateOn, onCreated }: { gateOn: boolean; onCreated: () => void }) {
   const [domain, setDomain] = useState("");
-  const [perm, setPerm] = useState<"read-only" | "workspace-write">("read-only");
-  const [dry, setDry] = useState(true);
-  const [out, setOut] = useState<string>("");
-  const [result, setResult] = useState<RunSubmitResult | null>(null); // U7: 성공 시 Runs 딥링크 배너용
-  const [err, setErr] = useState<string | null>(null);                // U7: 한국어 매핑(원시 String(e) 금지)
+  const [draft, setDraft] = useState<HarnessDraftResult["draft"] | null>(null);
   const [busy, setBusy] = useState(false);
-  const submit = async () => {
-    setBusy(true); setOut(""); setErr(null); setResult(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [created, setCreated] = useState<string[]>([]);
+  const genDraft = async () => {
+    setBusy(true); setMsg(null); setDraft(null); setCreated([]);
+    try { setDraft((await postHarnessDraft({ domain })).draft); }
+    catch (e) { setMsg(e instanceof BuildError ? `초안 실패: ${e.code}` : String(e)); }
+    finally { setBusy(false); }
+  };
+  const createAll = async () => {
+    if (!draft) return;
+    setBusy(true); setMsg(null);
+    // leaf-first(C audit HIGH): 스킬→에이전트→오케스트레이터 마지막. 오케스트레이터는 에이전트를 orchestrates 참조하므로
+    // 마지막에 생성해야 중간 실패 시 dangling(고아 오케스트레이터) 방지.
+    const items = [
+      ...draft.skills.map((s) => ({ kind: "skill" as const, ...s })),
+      ...draft.agents.map((a) => ({ kind: "agent" as const, ...a })),
+      { kind: "skill" as const, ...draft.orchestrator },
+    ];
+    const done: string[] = []; const skipped: string[] = [];
     try {
-      // U7: submitRun 재사용(구조 보존 승격) — 400/409 는 runSubmitErrorText, 그 외는 readErrorText(U1 헬퍼).
-      const r = await submitRun({ runtime, mode, domain, permissionMode: perm, dryRun: dry });
-      setResult(r);
-      setOut(JSON.stringify(r, null, 2));
-    } catch (e) {
-      if (e instanceof RunSubmitError) setErr(runSubmitErrorText(e.status, e.code, e.detail));
-      else setErr(readErrorText(e));
+      for (const it of items) {
+        try { await postBuildCreate({ kind: it.kind, name: it.name, content: it.content }); done.push(`${it.kind}:${it.name}`); }
+        catch (e) {
+          // 멱등 재시도(C R2): 이미 존재(name-collision)는 skip·계속(부분실패 후 재클릭 시 교착 방지). 그 외만 중단.
+          //   단 skip 은 done 과 분리(C R3): 기존 동명 정의는 내용이 초안과 다를 수 있어 "성공"으로 뭉뚱그리면 false-success.
+          if (e instanceof BuildError && e.code === "name-collision") { skipped.push(`${it.kind}:${it.name}`); continue; }
+          setMsg(`${it.name} 생성 실패: ${e instanceof BuildError ? e.code : String(e)} (${done.length}개 생성 후 중단·재클릭 시 이어서 시도)`); break;
+        }
+      }
+      setCreated([...done, ...skipped.map((s) => `${s}(기존·건너뜀)`)]);
+      const allAccountedFor = done.length + skipped.length === items.length;
+      if (allAccountedFor) {
+        const skipNote = skipped.length ? ` · ${skipped.length}개는 기존 동명 존재로 건너뜀(내용 상이 가능 — 확인 필요)` : "";
+        setMsg(`하네스 생성 완료 (신규 ${done.length}개${skipNote})`); onCreated();
+      }
     } finally { setBusy(false); }
   };
+  if (!gateOn) return <Card title="하네스 전체 자동 빌드 (실험)"><p className="muted">🔒 정의 편집 비활성 — Settings에서 켜야 사용 가능.</p></Card>;
+  const total = draft ? 1 + draft.agents.length + draft.skills.length : 0;
+  return (
+    <Card title="하네스 전체 자동 빌드 (실험)">
+      <p className="muted">
+        도메인 한 문장 → 팩토리가 <b>오케스트레이터+에이전트+스킬 초안</b>을 생성(격리·무도구 LLM·plan·디스크 미기록) → 검토 → 전체 생성.
+        <b>자동 적용 아님</b>(생성 버튼 필요). 생성분은 <a className="link" href="#/runs">History</a>에 기록.
+      </p>
+      <div className="form">
+        <label className="full">도메인<textarea value={domain} onChange={(e) => setDomain(e.target.value)} maxLength={400} rows={2} placeholder="예: PDF 청구서 파싱·검증 자동화 하네스" /></label>
+        <button disabled={busy || !domain} onClick={genDraft}>{busy ? "생성 중…" : "하네스 초안 생성"}</button>
+      </div>
+      {draft && (
+        <>
+          <Table cols={["종류", "이름"]} rows={[
+            ["오케스트레이터", draft.orchestrator.name],
+            ...draft.agents.map((a) => ["에이전트", a.name] as [string, string]),
+            ...draft.skills.map((s) => ["스킬", s.name] as [string, string]),
+          ]} />
+          <details className="tier-b"><summary>초안 내용 미리보기(JSON)</summary><pre className="out">{JSON.stringify(draft, null, 2).slice(0, 6000)}</pre></details>
+          <button className="primary" disabled={busy} onClick={createAll}>{busy ? "생성 중…" : `전체 생성 (${total}개)`}</button>
+        </>
+      )}
+      {created.length > 0 && <p className="muted">생성됨: {created.join(", ")}</p>}
+      {msg && <p className="muted">{msg}</p>}
+    </Card>
+  );
+}
+
+// Harness = 하네스 빌드 허브 — 목록 + 하네스 전체 자동빌드(C) + 정의 빌더(에이전트/스킬 단건).
+export function Build() {
+  const set = useApi<SettingsInfo>("/api/settings"); // definitionEditEnabled(빌더 게이트·A81)
+  const gateOn = set.data?.definitionEditEnabled === true;
+  const toHistory = () => { location.hash = "#/runs"; };
   return (
     <div className="screen">
-      <h2>New Run</h2>
-      <p className="lead">새 실행을 시작한다(에이전트 빌드 아님) — 작업을 정해 codex/claude를 실행하면 run이 생성되고 <a className="link" href="#/runs">History</a>에서 관찰한다.</p>
-      <Card title="실행 요청 (미리보기 기본)">
-        <div className="form">
-          <label>런타임<select value={runtime} onChange={(e) => setRuntime(e.target.value as "codex" | "claude")}><option value="codex">codex</option><option value="claude">claude</option></select></label>
-          <label>모드<input value={mode} onChange={(e) => setMode(e.target.value)} maxLength={40} /></label>
-          <label>권한<select value={perm} onChange={(e) => setPerm(e.target.value as "read-only" | "workspace-write")}><option value="read-only">read-only</option><option value="workspace-write">workspace-write</option></select></label>
-          <label className="full">작업(domain)<textarea value={domain} onChange={(e) => setDomain(e.target.value)} maxLength={4000} rows={4} /></label>
-          <label className="check"><input type="checkbox" checked={dry} onChange={(e) => setDry(e.target.checked)} /> dry-run(미리보기만)</label>
-          <button disabled={busy || !domain} onClick={submit}>{busy ? "실행 중…" : dry ? "미리보기" : "실행"}</button>
-        </div>
-        {/* U7: 제출 에러 한국어 인라인(A100·조용한 드롭 금지) */}
-        {err && <p className="banner err" role="alert">⚠ {err}</p>}
-        {/* U7: 실 실행 성공 → Runs 딥링크 착지 배너(F2 runsDeepLink 재사용). dry-run 은 미리보기만. */}
-        {result && result.dryRun === false && (
-          <p className="banner ok" role="status">
-            ✅ 실행을 시작했습니다 · <code className="path">{result.runId}</code>
-            {" "}<a className="link" href={runsDeepLink(result.runId)}>→ History에서 관찰</a>
-          </p>
-        )}
-        {out && <pre className="out">{out}</pre>}
-        {!dry && <p className="warn-text">⚠ 실 실행은 CLI 프로세스를 spawn합니다.</p>}
-      </Card>
+      <h2>Harness <span className="ver">하네스 빌드</span></h2>
+      <p className="lead">
+        하네스(오케스트레이터+에이전트+스킬)를 <b>구성·빌드</b>한다 — 목록 · <b>전체 자동 빌드</b> · 정의 빌더(단건).
+        구성 변경은 <a className="link" href="#/runs">History</a>에 기록. (조회·편집: <a className="link" href="#/context">Context</a> · <a className="link" href="#/agents">Agents</a>/<a className="link" href="#/skills">Skills</a>.)
+      </p>
+      <HarnessList />
+      <h3 className="lens-h">🏗 하네스 전체 자동 빌드 <span className="lens-tag">실험</span></h3>
+      <HarnessAutoBuild gateOn={gateOn} onCreated={toHistory} />
+      <h3 className="lens-h">🔨 정의 빌더 <span className="lens-tag muted">에이전트/스킬 단건</span></h3>
+      <ContextBuilder gateOn={gateOn} onCreated={toHistory} />
     </div>
   );
 }
@@ -721,66 +790,39 @@ const SORT_OPTS: Array<[RunsFilter["sort"], string]> = [
 const stateKind = (s: string | null): "ok" | "err" | "warn" | "muted" =>
   s === "completed" ? "ok" : s === "failed" || s === "cancelled" ? "err" : s === "blocked" || s === "stale" ? "warn" : "muted";
 
+// History = 하네스 구성 변경 이력(에이전트/스킬 추가·수정·삭제) — Build/Context 편집이 남긴 ledger(/api/config-changes).
+type ConfigChange = { at: string; action: "create" | "edit" | "delete"; kind: "agent" | "skill"; name: string; runtime: string; path: string };
+const CHANGE_ACTION: Record<string, { label: string; kind: "ok" | "warn" | "muted" }> = {
+  create: { label: "추가", kind: "ok" }, edit: { label: "수정", kind: "muted" }, delete: { label: "삭제", kind: "warn" },
+};
 export function Runs() {
-  const [filter, setFilter] = useState<RunsFilter>(() => parseQuery(location.search));
-  // A87: Agents New Run 딥링크(#/runs?run=<id>) 도착 시 해당 run 을 초기 선택 + 착지 배너.
-  const [focus] = useState<string | null>(() => focusRunFromHash(location.hash));
-  const [sel, setSel] = useState<string | null>(() => focusRunFromHash(location.hash));
-  const qs = buildQuery(filter);
-  // 필터 → 쿼리스트링 → refetch(path 변경 시 useApi 자동 재요청). 항상 인자 분기 → 신규 shape.
-  const st = useApi<RunsQueryResult>("/api/runs?" + qs);
-  // W2 URL 쿼리 반영(공유·새로고침 보존) — hash 라우팅(#/runs) 보존.
-  useEffect(() => {
-    history.replaceState(null, "", location.pathname + "?" + qs + location.hash);
-  }, [qs]);
-
-  const chips = activeChips(filter);
+  const st = useApi<{ changes: ConfigChange[]; total: number }>("/api/config-changes");
   return (
     <div className="screen">
-      <h2>History</h2>
-      <p className="lead">실행된 run 기록을 조회·필터·검색·관찰한다(읽기 전용 — 새 실행은 <a className="link" href="#/build">New Run</a>).</p>
-      {/* A87: New Run 딥링크 착지 배너(방금 생성한 run 관찰) */}
-      {focus && sel === focus && (
-        <div className="banner ok" role="status">👁 방금 생성한 run 을 관찰 중 · <code className="path">{focus}</code></div>
-      )}
-      {/* A83: 필터바는 fetch 상태와 독립 렌더 — 목록 로딩/에러가 필터바를 무너뜨리지 않음 */}
-      <FilterBar filter={filter} onApply={setFilter} />
-      {chips.length > 0 && (
-        <div className="chips" role="group" aria-label="활성 필터">
-          {chips.map((c) => (
-            <span key={c.key} className="chip">
-              <span className="chip-label">{c.label}: {c.value}</span>
-              <button className="chip-x" aria-label={`${c.label} 필터 제거`} title={`${c.label} 필터 제거`}
-                onClick={() => setFilter(clearField(filter, c.key as ChipField))}>✕</button>
-            </span>
-          ))}
-          <button className="link chip-clear" onClick={() => setFilter(clearAll())}>필터 초기화</button>
-        </div>
-      )}
-      <Async state={st}>{(d) => (
-        <>
-          <ResultBar data={d} onPage={(o) => setFilter(pageTo(filter, o))} />
-          {d.items.length === 0 ? (
-            <div className="empty" role="status">
-              <p className="muted">🔍 조건에 맞는 run 없음</p>
-              {hasActiveFilter(filter)
-                ? <button className="link" onClick={() => setFilter(clearAll())}>필터 초기화</button>
-                : <p className="muted">아직 실행 이력이 없습니다.</p>}
-            </div>
-          ) : (
-            <div className="split">
-              <Table cols={["runId", "상태", "런타임", "모드", "목표", "기록 시각"]} rows={d.items.map((r) => [
-                <button className="link" onClick={() => setSel(r.runId)}>{r.runId.slice(0, 30)}</button>,
-                <Badge kind={stateKind(r.state)}>{r.state ?? "무효"}</Badge>,
-                r.runtime ?? "—", r.mode ?? "—",
-                r.goal ? r.goal.slice(0, 60) : <span className="muted">—</span>,
-                r.recordedAt.slice(0, 19),
-              ])} />
-              {sel && <RunDetail key={sel} runId={sel} />}
-            </div>
-          )}
-        </>
-      )}</Async>
+      <h2>History <span className="ver">구성 변경 이력</span></h2>
+      <p className="lead">
+        하네스 구성(에이전트·스킬)을 <b>추가·수정·삭제</b>한 기록. <a className="link" href="#/build">Build</a>에서 생성하거나
+        <a className="link" href="#/context">Context</a>/<a className="link" href="#/agents">Agents</a>에서 편집하면 여기 남는다(읽기 전용).
+      </p>
+      <Card title="변경 기록 (최신순)">
+        <Async state={st}>{(d) => d.changes.length === 0 ? (
+          <div className="empty" role="status">
+            <p className="muted">🧪 아직 구성 변경 기록이 없습니다.</p>
+            <p className="muted">Build에서 에이전트/스킬을 생성하거나 정의를 편집하면 기록됩니다.</p>
+          </div>
+        ) : (
+          <>
+            <Table cols={["시각", "동작", "종류", "이름", "경로"]} rows={d.changes.map((c) => [
+              c.at.replace("T", " ").slice(0, 19),
+              <Badge kind={CHANGE_ACTION[c.action]?.kind ?? "muted"}>{CHANGE_ACTION[c.action]?.label ?? c.action}</Badge>,
+              c.kind === "agent" ? "에이전트" : "스킬",
+              c.name,
+              <code className="path">{c.path}</code>,
+            ])} />
+            <p className="muted">총 {d.total}건 · UI에서 발생한 구성 변경만 기록(CLI 직접 변경은 미포함).</p>
+          </>
+        )}</Async>
+      </Card>
     </div>
   );
 }
@@ -1670,7 +1712,7 @@ function HarnessScorecardCard() {
     setBusy(true); setSnapMsg(null);
     try {
       const r = await apiPost<{ written: boolean }>("/api/eval/harness-scorecard/snapshot", {});
-      setSnapMsg(r.written ? "스냅샷 기록됨 — 추세 갱신" : "변경 없음(스킵)");
+      setSnapMsg(r.written ? "스냅샷 기록됨 — 추세 갱신" : "변경 없음 — 구성 파일(.claude/agents·skills) 미변경이라 스킵(중복 방지). 정의가 바뀌면 자동 기록.");
       trend.reload();
     } catch (e) { setSnapMsg("기록 실패: " + String(e)); }
     finally { setBusy(false); }
@@ -1689,7 +1731,9 @@ function HarnessScorecardCard() {
         const order = ["orphan", "dead_link", "coverage_gap", "incomplete_def", "oversize", "unknown_scope", "link_unknown"];
         return (
           <>
-            {/* A. 라이브 건강도 */}
+            {/* A. 라이브 건강도 — ①요약 ②분류 두 표에 제목·설명 부여 */}
+            <h4 className="sc-sub">① 요약</h4>
+            <p className="sc-desc">이 하네스가 factory인지·에이전트/스킬 수·고아 수·config 지문(state_key). 지금 상태 한눈.</p>
             <Table cols={["항목", "값"]} rows={[
               ["범위(runtime)", <Badge kind={d.scope.runtime === "factory" ? "ok" : "muted"}>{d.scope.runtime}</Badge>],
               ["에이전트 / 스킬", `${d.counts.agents} / ${d.counts.skills}`],
@@ -1702,6 +1746,11 @@ function HarnessScorecardCard() {
               </>],
               ["state_key", <code>{d.state_key.slice(0, 12)}</code>],
             ]} />
+            <h4 className="sc-sub">② 분류별 결함</h4>
+            <p className="sc-desc">
+              <b>고아</b>=확실히 무연결(감점) · <b>미선언(부채)</b>=아직 모름·감점X(마이그레이션 부채) ·
+              <b>dead-link</b>=선언 대상 파일 부재 · <b>커버리지 갭</b>=오케스트레이터 미배정. 건수 클릭 시 대상 펼침.
+            </p>
             <Table cols={["분류", "건수", "대상"]} rows={order.map((t) => {
               const items = byType(t);
               const isDebt = t === "link_unknown" || t === "unknown_scope";
@@ -1727,8 +1776,13 @@ function HarnessScorecardCard() {
                 ])} />
               </details>
             )}
-            {/* B. 추세 */}
-            <h3 style={{ marginTop: 18 }}>추세</h3>
+            {/* B. 추세 — 시계열(스냅샷 간 비교) */}
+            <hr className="sc-div" />
+            <h4 className="sc-sub">③ 추세 <span className="sc-tag">스냅샷 시계열</span></h4>
+            <p className="sc-desc">
+              위 ①②는 <b>지금 한 시점</b>, 여기는 <b>스냅샷 사이 변화</b>. 감점 결함 증감으로 <b>개선/퇴행</b> 판정 ·
+              신규/해소 결함 · 부채 추이. <b>스냅샷 2개 이상</b> 쌓여야 판정(아래 [지금 스냅샷 기록]으로 축적).
+            </p>
             <Async state={trend}>{(t) => {
               const v = VERDICT[t.verdict]!;
               return (
@@ -1755,6 +1809,100 @@ function HarnessScorecardCard() {
   );
 }
 
+const ADOPTION_STAGES = [
+  { n: 1, label: "측정·로깅", desc: "기록만" },
+  { n: 2, label: "사람 검토", desc: "수동 판단" },
+  { n: 3, label: "제안(실험)", desc: "개선안 emit" },
+  { n: 4, label: "잠금", desc: "표시 전용" },
+] as const;
+
+type GateStatus = {
+  stage: number; nextStage: number | null;
+  logging: { count: number; required: number; met: boolean };
+  adjudicated: { count: number; required: number; met: boolean };
+  eligible: boolean; recommendation: "advance" | "hold" | "locked";
+  reasons: string[]; counterSignals: string[]; autoAdvanceEligible: boolean; note: string;
+};
+
+// 자기평가 체계의 상태 헤더 — 채택 단계 스테퍼 + 졸업 게이트(에이전트 분석·추천, 사람 정보결정 상향).
+function AdoptionStageHeader() {
+  const st = useApi<EvalsConfigResolved>("/api/evals/config");
+  const gate = useApi<GateStatus>("/api/evals/gate");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const advance = async (cfg: EvalsConfigResolved, to: number) => {
+    setBusy(true); setMsg(null);
+    try {
+      const form = {
+        adoptionStage: to as 1 | 2 | 3,
+        metrics: cfg.metrics,
+        thresholds: {
+          minAdjudicatedClaims: String(cfg.thresholds.minAdjudicatedClaims.value),
+          rollingN: String(cfg.thresholds.rollingN.value),
+          declineStreak: String(cfg.thresholds.declineStreak.value),
+        } as Record<string, string>,
+      };
+      await apiPost("/api/evals/config", buildConfigPatch(cfg, form));
+      setMsg(`단계 ${to}로 상향됨(사람 결정 반영)`); st.reload(); gate.reload();
+    } catch (e) { setMsg("상향 실패: " + String(e)); } finally { setBusy(false); }
+  };
+  return (
+    <Card title="자기평가 체계 · 채택 단계">
+      <Async state={st}>{(cfg) => (
+        <>
+          <div className="stage-steps" role="list" aria-label="채택 단계">
+            {ADOPTION_STAGES.map((s) => (
+              <span key={s.n} role="listitem"
+                className={"stage-step" + (s.n === cfg.adoptionStage ? " on" : s.n < cfg.adoptionStage ? " past" : "")}>
+                <b>{s.n}</b> {s.label}
+              </span>
+            ))}
+          </div>
+          <p className="muted">
+            현재 <b>단계 {cfg.adoptionStage} · {ADOPTION_STAGES[cfg.adoptionStage - 1]!.label}</b> — 자동화 수위(1 측정만 → 4 잠금)를
+            규정하며 두 렌즈(구성·루프) 공통. <b>제안은 자동 적용되지 않습니다</b>(사람 승인). {cfg.adoptionStage === 4 && "🔒 설정 잠금(표시 전용)."}
+          </p>
+          {/* 졸업 게이트 — 조건 진척·에이전트 권고·반대신호·정보결정 상향(추인 아님·자동 승격 아님) */}
+          <Async state={gate}>{(g) => (
+            <div className="gate-panel">
+              <div className="gate-head">
+                <b>다음 단계 게이트{g.nextStage ? ` (→ ${g.nextStage} · ${ADOPTION_STAGES[g.nextStage - 1]!.label})` : ""}</b>
+                {g.recommendation === "advance" && <Badge kind="ok">상향 권장</Badge>}
+                {g.recommendation === "hold" && <Badge kind="muted">보류</Badge>}
+                {g.recommendation === "locked" && <Badge kind="muted">잠금</Badge>}
+              </div>
+              <Table cols={["조건", "진척", "충족"]} rows={[
+                ["로깅(관측)", `${g.logging.count} / ${g.logging.required}`, g.logging.met ? <Badge kind="ok">✓</Badge> : <Badge kind="warn">✗</Badge>],
+                ["판정 누적(adjudicated)", `${g.adjudicated.count} / ${g.adjudicated.required}`, g.adjudicated.met ? <Badge kind="ok">✓</Badge> : <Badge kind="warn">✗</Badge>],
+                ["사람 승인", "필수(자동 승격 아님)", <Badge kind="muted">—</Badge>],
+              ]} />
+              {g.reasons.length > 0 && <p className="muted">· {g.reasons.join(" · ")}</p>}
+              {g.counterSignals.length > 0 && (
+                <div className="gate-counter">
+                  <p className="warn-text">⚠ 반대신호(상향 신중):</p>
+                  <ul>{g.counterSignals.map((c, i) => <li key={i} className="muted">{c}</li>)}</ul>
+                </div>
+              )}
+              {g.recommendation === "advance" && g.nextStage && g.nextStage <= 3 && (
+                <div className="gate-actions">
+                  <button type="button" className="primary" disabled={busy} onClick={() => advance(cfg, g.nextStage!)}>
+                    {busy ? "상향 중…" : `단계 ${g.nextStage}로 상향`}
+                  </button>
+                  <span className="muted">
+                    {g.autoAdvanceEligible ? " 저위험(검토만 켬)" : " 근거·반대신호 확인 후 결정"} · 되돌리기 신중(자동 행동 권한 확대)
+                  </span>
+                </div>
+              )}
+              {g.stage === 3 && <p className="muted">3→4(자동 적용)는 UI 상향 없음 — 승인 사다리·수동 결정(교리).</p>}
+              {msg && <p className="muted">{msg}</p>}
+            </div>
+          )}</Async>
+        </>
+      )}</Async>
+    </Card>
+  );
+}
+
 export function Eval() {
   const idx = useApi<EvalsIndex>("/api/evals");
   const [loop, setLoop] = useState<string | null>(null);
@@ -1762,10 +1910,13 @@ export function Eval() {
     <div className="screen">
       <h2>Eval <span className="ver">자기평가</span></h2>
       <p className="muted">
-        자기평가 기록 보기 · 자기개선 제안(사람 승인만) · 평가지표 설정. <b>이 점수는 "정합도"이며 품질 점수가 아닙니다</b> ·
-        제안은 <b>자동 적용되지 않습니다</b>(정의 편집기에서 수동 검토·저장).
+        하네스를 <b>두 렌즈</b>로 잰다 — <b>구성(주축)</b>: 에이전트·스킬·오케스트레이터 건강도 / <b>루프(보조)</b>: 외부리뷰 효율.
+        위 <b>채택 단계</b>가 자동화 수위를 정하고, <b>제안은 자동 적용되지 않는다</b>(정의 편집기에서 수동 검토·저장). 점수는 "정합도"이지 품질 점수가 아니다.
       </p>
+      <AdoptionStageHeader />
+      <h3 className="lens-h">🎯 구성 <span className="lens-tag">주축</span></h3>
       <HarnessScorecardCard />
+      <h3 className="lens-h">🔁 루프 <span className="lens-tag muted">보조</span></h3>
       <Async state={idx}>{(d) => <EvalIndexBody idx={d} loop={loop} onLoop={setLoop} />}</Async>
     </div>
   );
@@ -1801,8 +1952,11 @@ function EvalIndexBody({ idx, loop, onLoop }: { idx: EvalsIndex; loop: string | 
       )}
       {loop && <LoopTrendCard key={loop} loop={loop} onClose={() => onLoop(null)} />}
       {loop && <ProposalCard key={"prop:" + loop} loop={loop} />}
-      {/* Part C 지표관리 — 항상 표시(읽기/쓰기 경계 명확·독립 로딩) */}
-      <EvalsConfigCard />
+      {/* Part C 지표관리 — 루프 판정 거버넌스(임계·지표·채택 단계 편집). 고급으로 접어 계층 분리. */}
+      <details className="tier-b lens-adv">
+        <summary>⚙ 고급 · 루프 판정 설정 (임계·지표·채택 단계 편집)</summary>
+        <EvalsConfigCard />
+      </details>
     </>
   );
 }
@@ -1986,7 +2140,7 @@ function GateTable({ gate }: { gate: EvalProposal["gate"] }) {
 function EvalsConfigCard() {
   const st = useApi<EvalsConfigResolved>("/api/evals/config");
   return (
-    <Card title="평가지표 설정">
+    <Card title="루프 판정 설정 (채택 단계·임계·지표)">
       {/* 정합: adoptionStage 4 = display-only 잠금 → 폼 편집 비활성(쓰기 경로 없음·교리). 1~3 만 편집 폼. */}
       <Async state={st}>{(cfg) => cfg.adoptionStage === 4
         ? <LockedConfigView key="locked" cfg={cfg} />
@@ -2169,12 +2323,12 @@ export function Context() {
     <div className="screen">
       <h2>Context</h2>
       <p className="muted">
-        멀티런타임 하네스 컨텍스트(읽기 전용) + 신규 정의 빌더. 편집은 Claude 정의(<code>.claude/agents·skills</code>)만 가능하며,
+        멀티런타임 하네스 컨텍스트(읽기 전용) + 기존 정의 편집. 편집은 Claude 정의(<code>.claude/agents·skills</code>)만 가능하며,
         Codex·Antigravity 정의와 CLAUDE.md·AGENTS.md·GEMINI.md 는 현재 편집을 지원하지 않습니다(읽기 전용).
+        신규 에이전트/스킬 <b>빌드</b>는 <a className="link" href="#/build">Build</a>에서.
       </p>
-      {/* A83: 트리는 자체 3-state. 빌더는 트리 로드 실패·빈 상태와 무관하게 항상 표시(A128) */}
+      {/* A83: 트리는 자체 3-state. 빌더는 Build 화면으로 이동(F10→Build 승격). */}
       <Async state={tree}>{(t) => <ContextBrowser tree={t} gateOn={gateOn} onChanged={tree.reload} />}</Async>
-      <ContextBuilder gateOn={gateOn} onCreated={tree.reload} />
     </div>
   );
 }

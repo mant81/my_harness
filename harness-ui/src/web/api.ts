@@ -469,6 +469,23 @@ export async function postBuildCreate(body: { kind: CtxDefKind; name: string; co
   return r.json() as Promise<BuildCreateResult>;
 }
 
+// C: 하네스 전체 초안 — 오케스트레이터+에이전트+스킬 세트(디스크 미기록·applied:false). 생성은 postBuildCreate 반복.
+export type HarnessDraftItem = { name: string; content: string };
+export type HarnessDraftResult = { ok: true; applied: false; draft: { orchestrator: HarnessDraftItem; agents: HarnessDraftItem[]; skills: HarnessDraftItem[] } };
+export async function postHarnessDraft(body: { domain: string }): Promise<HarnessDraftResult> {
+  const r = await fetch("/api/context/build/harness-draft", {
+    method: "POST",
+    headers: authHeaders({ "content-type": "application/json" }),
+    body: JSON.stringify({ ...body, runtime: "claude" }),
+  });
+  if (r.status === 401) { clearSession(); throw new ApiGetError(401, "/api/context/build/harness-draft"); }
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({} as { error?: string; detail?: unknown }));
+    throw new BuildError(r.status, String(d.error ?? r.status), d.detail);
+  }
+  return r.json() as Promise<HarnessDraftResult>;
+}
+
 // ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
 // healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
 // 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).

@@ -1,7 +1,7 @@
 // src/server/adapters/scorecard.ts
 import { constants as constants2 } from "node:fs";
 import { createHash } from "node:crypto";
-import { writeFile, mkdir, appendFile, open as open2 } from "node:fs/promises";
+import { open as open2 } from "node:fs/promises";
 import { join as join2 } from "node:path";
 
 // src/server/adapters/harness.ts
@@ -245,27 +245,28 @@ function computeConfigHash(inputs) {
   return createHash("sha256").update(canon).digest("hex").slice(0, 32);
 }
 var MAX_WAIVERS = 2e3;
-async function readWaivers(root2, now) {
+async function readWaivers(root2, now2) {
   const raw = await readCappedDef(join2(root2, "_workspace", "evals", "waivers.json"));
-  if (raw === null) return /* @__PURE__ */ new Set();
+  if (raw === null) return /* @__PURE__ */ new Map();
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return /* @__PURE__ */ new Set();
+    return /* @__PURE__ */ new Map();
   }
-  if (!Array.isArray(parsed)) return /* @__PURE__ */ new Set();
-  const active = /* @__PURE__ */ new Set();
+  if (!Array.isArray(parsed)) return /* @__PURE__ */ new Map();
+  const active = /* @__PURE__ */ new Map();
   for (const w of parsed.slice(0, MAX_WAIVERS)) {
     if (!w || typeof w !== "object") continue;
     const fid = w.finding_id;
     const exp = w.expires_at;
+    const reason = w.reason;
     if (typeof fid !== "string" || !fid) continue;
     if (exp !== void 0) {
       if (typeof exp !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(exp)) continue;
-      if (now && exp < now) continue;
+      if (now2 && exp < now2) continue;
     }
-    active.add(fid);
+    active.set(fid, { expires_at: typeof exp === "string" ? exp : void 0, reason: typeof reason === "string" ? reason : void 0 });
   }
   return active;
 }
@@ -490,15 +491,24 @@ async function computeHarnessScorecard(root2, opts = {}) {
   }
   findings.sort((a, b) => a.id.localeCompare(b.id));
   const active = await readWaivers(root2, opts.now);
-  for (const f of findings) if (active.has(f.id)) f.waived = true;
+  for (const f of findings) {
+    const w = active.get(f.id);
+    if (w) {
+      f.waived = true;
+      f.waiver_expires_at = w.expires_at;
+      f.waiver_reason = w.reason;
+    }
+  }
   const inputs = [];
   for (const a of agents) inputs.push({ path: a.sourcePath, content: await safeRead(root2, a.sourcePath) });
   for (const s of skills) for (const rp of s.runtimePaths) inputs.push({ path: rp + "/SKILL.md", content: await safeRead(root2, rp + "/SKILL.md") });
   const counts = tally(findings, agents.length, skills.length);
   const isFactory = await safeExists(join2(root2, "skills", "myharness"));
+  const config_hash = computeConfigHash(inputs);
   return {
     schema_version: 1,
-    config_hash: computeConfigHash(inputs),
+    config_hash,
+    state_key: computeStateKey(config_hash, findings),
     generated_at: null,
     scope: { root: root2, runtime: isFactory ? "factory" : "built" },
     counts,
@@ -510,13 +520,17 @@ async function computeHarnessScorecard(root2, opts = {}) {
     stale: false
   };
 }
+function computeStateKey(configHash, findings) {
+  const ids = findings.filter((f) => !f.waived).map((f) => f.id).sort();
+  return createHash("sha256").update(configHash + "|" + ids.join("\n")).digest("hex").slice(0, 32);
+}
 async function safeRead(root2, rel) {
   return await readCappedDef(join2(root2, rel)) ?? "";
 }
 async function safeExists(p) {
   try {
-    const { stat: stat2 } = await import("node:fs/promises");
-    await stat2(p);
+    const { stat: stat3 } = await import("node:fs/promises");
+    await stat3(p);
     return true;
   } catch {
     return false;
@@ -536,10 +550,234 @@ function tally(findings, agents, skills) {
   return { ...base, agents, skills };
 }
 
+// src/server/adapters/scorecard-snapshot.ts
+import { open as open3, mkdir, readFile, writeFile, rename, unlink, link, stat as stat2, readdir as readdir2 } from "node:fs/promises";
+import { hostname } from "node:os";
+import { randomUUID } from "node:crypto";
+import { join as join3 } from "node:path";
+var PENALIZED = ["orphan", "dead_link", "coverage_gap", "incomplete_def", "oversize"];
+var DEBT = ["link_unknown", "unknown_scope"];
+var MAX_ACTIVE_IDS = 500;
+var LOCK_TTL_MS = 2 * 60 * 1e3;
+var MAX_SUMMARY_BYTES = 1 << 20;
+function deriveSummary(sc, nowIso) {
+  const active = sc.findings.filter((f) => !f.waived);
+  const penalized = active.filter((f) => PENALIZED.includes(f.type)).length;
+  const debt = active.filter((f) => DEBT.includes(f.type)).length;
+  const ids = active.map((f) => f.id).sort();
+  const truncated = ids.length > MAX_ACTIVE_IDS;
+  return {
+    generated_at: nowIso,
+    config_hash: sc.config_hash,
+    state_key: sc.state_key,
+    scope: sc.scope.runtime,
+    counts: sc.counts,
+    penalized,
+    debt,
+    active_ids: ids.slice(0, MAX_ACTIVE_IDS),
+    truncated
+  };
+}
+var HOST = hostname();
+var RELEASE_MARGIN_MS = 10 * 1e3;
+async function gcTemps(dir) {
+  try {
+    for (const f of await readdir2(dir)) {
+      if (!(f.startsWith(".harness-scorecard.lock.tmp.") || f.startsWith(".harness-scorecard.lock.stale.") || f.startsWith("harness_scorecard.json.tmp."))) continue;
+      const p = join3(dir, f);
+      try {
+        const st = await stat2(p);
+        if (Date.now() - st.mtimeMs > LOCK_TTL_MS) await unlink(p).catch(() => {
+        });
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+async function tryLock(dir) {
+  const lockPath = join3(dir, ".harness-scorecard.lock");
+  const tmp = join3(dir, ".harness-scorecard.lock.tmp." + randomUUID());
+  const fh = await open3(tmp, "w");
+  try {
+    await fh.writeFile(JSON.stringify({ pid: process.pid, host: HOST, startedAt: Date.now() }));
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+  const cleanupTmp = async () => {
+    await unlink(tmp).catch(() => {
+    });
+  };
+  const acquiredAt = Date.now();
+  const release = async () => {
+    if (Date.now() - acquiredAt < LOCK_TTL_MS - RELEASE_MARGIN_MS) {
+      try {
+        const [l, t] = await Promise.all([stat2(lockPath), stat2(tmp)]);
+        if (l.ino === t.ino && l.dev === t.dev && Date.now() - acquiredAt < LOCK_TTL_MS - RELEASE_MARGIN_MS)
+          await unlink(lockPath).catch(() => {
+          });
+      } catch {
+      }
+    }
+    await cleanupTmp();
+  };
+  try {
+    await link(tmp, lockPath);
+    return release;
+  } catch (e) {
+    const code = e.code;
+    if (code !== "EEXIST") {
+      await cleanupTmp();
+      throw e;
+    }
+    if (await isStale(lockPath)) {
+      const aside = lockPath + ".stale." + randomUUID();
+      try {
+        await rename(lockPath, aside);
+      } catch {
+        await cleanupTmp();
+        return null;
+      }
+      if (!await isStale(aside)) {
+        let orphan = false;
+        try {
+          orphan = (await stat2(aside)).nlink === 1;
+        } catch {
+          orphan = true;
+        }
+        if (orphan) await unlink(aside).catch(() => {
+        });
+        else await rename(aside, lockPath).catch(() => {
+        });
+        await cleanupTmp();
+        return null;
+      }
+      await unlink(aside).catch(() => {
+      });
+      try {
+        await link(tmp, lockPath);
+        return release;
+      } catch {
+        await cleanupTmp();
+        return null;
+      }
+    }
+    await cleanupTmp();
+    return null;
+  }
+}
+async function isStale(lockPath) {
+  let st;
+  try {
+    st = await stat2(lockPath);
+  } catch {
+    return false;
+  }
+  return Date.now() - st.mtimeMs > LOCK_TTL_MS;
+}
+async function writeHarnessScorecardSnapshot(sc, root2, nowIso) {
+  const dir = join3(root2, "_workspace", "evals");
+  await mkdir(dir, { recursive: true });
+  await gcTemps(dir);
+  const release = await tryLock(dir);
+  if (!release) return { written: false, state_key: sc.state_key, skipped: "contention" };
+  try {
+    const summaryPath = join3(dir, "harness_summary.jsonl");
+    const jsonPath = join3(dir, "harness_scorecard.json");
+    const lastKey = await lastSummaryStateKey(summaryPath);
+    const jsonKey = await jsonStateKey(jsonPath);
+    if (lastKey === sc.state_key && jsonKey === sc.state_key) return { written: false, state_key: sc.state_key, skipped: "unchanged" };
+    if (lastKey !== sc.state_key) {
+      await ensureTrailingNewline(summaryPath);
+      await appendLineFsync(summaryPath, JSON.stringify(deriveSummary(sc, nowIso)));
+    }
+    const stamped = { ...sc, generated_at: nowIso };
+    const jtmp = jsonPath + ".tmp." + randomUUID();
+    await writeFile(jtmp, JSON.stringify(stamped, null, 2));
+    await rename(jtmp, jsonPath);
+    return { written: true, state_key: sc.state_key };
+  } finally {
+    await release();
+  }
+}
+async function ensureTrailingNewline(path) {
+  let st;
+  try {
+    st = await stat2(path);
+  } catch {
+    return;
+  }
+  if (st.size === 0) return;
+  const fh = await open3(path, "r");
+  try {
+    const buf = Buffer.alloc(1);
+    await fh.read(buf, 0, 1, st.size - 1);
+    if (buf[0] !== 10) {
+      const a = await open3(path, "a");
+      try {
+        await a.appendFile("\n");
+        await a.sync();
+      } finally {
+        await a.close();
+      }
+    }
+  } finally {
+    await fh.close();
+  }
+}
+async function appendLineFsync(path, line) {
+  const fh = await open3(path, "a");
+  try {
+    await fh.appendFile(line + "\n");
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
+async function jsonStateKey(path) {
+  try {
+    return JSON.parse(await readFile(path, "utf8")).state_key ?? null;
+  } catch {
+    return null;
+  }
+}
+async function readSummaryLines(path) {
+  let raw = "";
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return [];
+  }
+  if (raw.length > MAX_SUMMARY_BYTES) raw = raw.slice(raw.length - MAX_SUMMARY_BYTES);
+  const out = [];
+  for (const ln of raw.split("\n")) {
+    if (!ln.trim()) continue;
+    try {
+      const o = JSON.parse(ln);
+      if (o && typeof o.state_key === "string") out.push(o);
+    } catch {
+    }
+  }
+  return out;
+}
+async function lastSummaryStateKey(path) {
+  const lines = await readSummaryLines(path);
+  return lines.length ? lines[lines.length - 1].state_key : null;
+}
+
 // src/server/adapters/scorecard-cli.ts
-var root = process.argv[2] || process.cwd();
-computeHarnessScorecard(root, { now: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }).then((sc) => {
-  process.stdout.write(JSON.stringify(sc, null, 2) + "\n");
+var args = process.argv.slice(2);
+var snapshot = args.includes("--snapshot");
+var root = args.find((a) => !a.startsWith("--")) || process.cwd();
+var now = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+computeHarnessScorecard(root, { now }).then(async (sc) => {
+  if (snapshot) {
+    const r = await writeHarnessScorecardSnapshot(sc, root, (/* @__PURE__ */ new Date()).toISOString());
+    process.stdout.write(JSON.stringify(r) + "\n");
+  } else {
+    process.stdout.write(JSON.stringify(sc, null, 2) + "\n");
+  }
 }).catch((e) => {
   process.stderr.write(String(e?.stack || e) + "\n");
   process.exit(1);
