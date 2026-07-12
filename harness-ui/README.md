@@ -24,6 +24,8 @@ npm start        # 프로덕션: 빌드 → 단일서버(127.0.0.1:5174) → 브
 
 접속은 **런처가 연 1회용 링크**로만(토큰 단일사용 → 세션 교환). 세션 만료 시 재접속.
 
+> **myharness 자동 설치(postinstall):** `npm install` 시 팩토리 스킬을 `~/.claude/skills/myharness`(레포 정본 심링크·항상 최신)로 설치한다. **이미 있으면 재연결(업데이트)만**, marketplace 플러그인으로 설치돼 있으면 중복 방지로 스킵(그때는 `/plugin update myharness`). CI·`HARNESS_UI_SKIP_MYHARNESS=1`은 스킵. npm install을 실패시키지 않음(부가 편의). 수동 재실행: `npm run install:myharness`.
+
 ## 스택
 
 Fastify(서버) · React + Vite + TypeScript(웹) · Zod(스키마). 외부 런타임 없이 파일 상태만 읽음. Mintlify식 디자인(라이트 우선 + 다크). 3-OS(ubuntu/macOS/windows × node 20/22) CI green.
