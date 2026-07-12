@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-12
+
+My Harness Web에 **팩토리(myharness) 유지관리** 기능 추가 — 웹에서 설치·업데이트·제거를 명확히. 보안(HOME 쓰기)·UX 각각 codex+agy 외부감사 수렴(양엔진 no-high).
+
+### Added
+
+- **팩토리 유지관리 (F11) — harness-ui `#/build` 상태 카드** — 하네스웹에서 myharness 설치·업데이트·제거를 한눈에. `#/build` 상단 상주 접이식 카드(미설치=강조·펼침 / 설치·최신=얇은 스트립)로 설치 방식별(Claude 글로벌 스킬 · Codex 스킬 · marketplace 플러그인) 상태·버전·드리프트 표시. 모드 스위치가 아닌 상태 카드로 병합 — build는 팩토리 설치와 무관하게 동작. 서버 `factory.ts`(감지+적용·고정 경로·소스 정체성 검증·부모 심링크 차단·백업·원자 원복), config `factoryMaintenanceEnabled` 게이트(fail-closed), API `GET /factory/status`·`POST /factory/apply`·설정 토글. 보안 외부감사 R1~R6·UX 외부감사 R1~R3 수렴.
+- **`npm install` 시 myharness 자동 설치/업데이트 (postinstall)** — harness-ui 설치 시 팩토리 스킬을 `~/.claude/skills/myharness`로 설치(심링크 우선·항상 최신). 이미 있으면 재연결(업데이트)만, marketplace 플러그인 감지 시 중복 방지 스킵. 부모 심링크 차단·백업(하드삭제 금지)·실패 시 원복·CI/`HARNESS_UI_SKIP_MYHARNESS` opt-out 스킵·`npm install` 무해(exit 0). 수동: `npm run install:myharness`.
+
+### Fixed
+
+- **팩토리 유지관리 UX 경화** — 설치 성공 메시지 소멸(자동 접힘+reload 시 data 비움) → `setOpen` 유지 + 마지막 상태 캐시 폴백. 낙관적 캐시 패치(제거 후 '설치됨' 모순·reload 실패 stale 방지). 액션별 진행표시·동시 쓰기 잠금·에러 한국어화·상태 조회 실패 표시·a11y(`aria-expanded`·`role`)·`#/factory`→`#/build` 리다이렉트 무플래시.
+
 ## [1.5.0] - 2026-07-12
 
 관측·통제 컴패니언 웹 앱 **My Harness Web** 도입(v0.5 코어~v0.6 전기능·Mintlify 개편)과 **자기평가 config-centric 재정향**(하네스 구성상태 개선 중심)이 주축. 각 마일스톤·기능은 codex+agy 외부감사(러너 claude 제외)로 라운드별 HIGH 0 수렴.
