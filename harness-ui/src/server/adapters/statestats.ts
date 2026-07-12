@@ -106,6 +106,7 @@ export async function settings(root: string) {
     projectsHome: envHome ?? config.projectsHome ?? null, // 표시용: env 우선, config 힌트 폴백
     projectsHomeProvisioned: envHome !== null,           // 경계 프로비저닝 여부(env SSOT 기준)
     definitionEditEnabled: config.definitionEditEnabled, // F7 게이트(불변 false 기본)
+    factoryMaintenanceEnabled: config.factoryMaintenanceEnabled, // F11 게이트(HOME 스킬 쓰기·불변 false 기본)
     mutationEnabled: false,                              // 전면 파일수정 API 불변 비활성
     // CLI 경로/기본모델/sandbox 는 /api/runtimes·환경에서. 여기선 조회만.
   };

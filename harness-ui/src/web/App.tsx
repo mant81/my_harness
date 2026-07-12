@@ -116,11 +116,15 @@ export function App() {
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
+  // 딥링크 보존 — 구 #/factory 는 #/build(FactoryPanel)로 흡수. 리다이렉트.
+  useEffect(() => { if (cur === "factory") location.hash = "#/build"; }, [cur]);
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     try { localStorage.setItem("harness-theme", theme); } catch { /* private mode */ }
   }, [theme]);
-  const active = SCREENS.find((s) => s.id === cur) ?? SCREENS[0];
+  // 구 #/factory 는 build 로 정규화 — effect 리다이렉트 전에도 Overview 플래시 없이 build 렌더.
+  const activeId = cur === "factory" ? "build" : cur;
+  const active = SCREENS.find((s) => s.id === activeId) ?? SCREENS[0];
   const Body = active.C;
   const byId = (id: string) => SCREENS.find((s) => s.id === id)!;
   return (

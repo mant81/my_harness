@@ -15,6 +15,7 @@ import {
   docsTreePath, docPreviewPath, postDocsSources, DocsSourcesError,
   CONTEXT_TREE_PATH, contextFilePath, downloadContextFile,
   postBuildDraft, postBuildCreate, postHarnessDraft, BuildError, type HarnessDraftResult,
+  setFactoryMaintenance, applyFactory, type FactoryStatus, type SkillState, type FactoryTarget, type FactoryAction,
   type ContextTree as ContextTreeShape, type ContextNode as CtxNode,
   type ContextFilePreview,
   type DocsNode, type DocsTree, type DocPreview,
@@ -292,6 +293,7 @@ export function Build() {
         하네스(오케스트레이터+에이전트+스킬)를 <b>구성·빌드</b>한다 — 목록 · <b>전체 자동 빌드</b> · 정의 빌더(단건).
         구성 변경은 <a className="link" href="#/runs">History</a>에 기록. (조회·편집: <a className="link" href="#/context">Context</a> · <a className="link" href="#/agents">Agents</a>/<a className="link" href="#/skills">Skills</a>.)
       </p>
+      <FactoryPanel />
       <HarnessList />
       <h3 className="lens-h">🏗 하네스 전체 자동 빌드 <span className="lens-tag">실험</span></h3>
       <HarnessAutoBuild gateOn={gateOn} onCreated={toHistory} />
@@ -1304,6 +1306,156 @@ function ConfirmDialog({ title, onCancel, children }: { title: string; onCancel:
         {children}
       </div>
     </div>
+  );
+}
+
+// ── Factory (F11 — myharness 설치·업데이트·유지관리) ──
+function skillStateLabel(s: SkillState): { badge: "ok" | "warn" | "muted" | "err"; text: string } {
+  if (s.kind === "absent") return { badge: "muted", text: "미설치" };
+  if (s.kind === "symlink") return s.synced ? { badge: "ok", text: "설치됨 · 최신(정본 심링크)" } : { badge: "warn", text: "심링크가 다른 곳 — 재연결 권장" };
+  if (s.kind === "copy") return { badge: "warn", text: "설치됨 · 복사본(옛 버전일 수 있음) — 업데이트 권장" };
+  return { badge: "err", text: "예기치 않은 형태(파일 등)" };
+}
+const skillSynced = (s: SkillState) => s.kind === "symlink" && s.synced;
+// 적용 결과 method → 사람 문구.
+function methodText(m: string): string {
+  return m === "symlink" ? "심링크 연결" : m === "copy" ? "복사 설치" : m === "removed" ? "제거" : m === "noop" ? "이미 최신(변경 없음)" : m;
+}
+// 복사 버튼 — 클립보드 없으면 조용히 미노출(로컬 dev·안전). 실패 시 피드백.
+function CopyBtn({ text }: { text: string }) {
+  const [state, setState] = useState<"idle" | "done" | "fail">("idle");
+  if (typeof navigator === "undefined" || !navigator.clipboard) return null;
+  const onClick = async () => {
+    try { await navigator.clipboard.writeText(text); setState("done"); }
+    catch { setState("fail"); }
+    setTimeout(() => setState("idle"), 1500);
+  };
+  return <button className="fac-copy" onClick={onClick} aria-label="명령 복사">
+    {state === "done" ? "복사됨 ✓" : state === "fail" ? "복사 실패" : "복사"}
+  </button>;
+}
+
+function FactoryTargetCard({ title, dest, state, enabled, onApply, busy, pendingAction }: {
+  title: string; dest: string; state: SkillState; enabled: boolean; busy: boolean;
+  pendingAction: FactoryAction | null; onApply: (action: FactoryAction) => void;
+}) {
+  const lbl = skillStateLabel(state);
+  const installed = state.kind !== "absent";
+  const synced = skillSynced(state);
+  const btnText = (action: FactoryAction, label: string) => (pendingAction === action ? "처리 중…" : label);
+  return (
+    <Card title={title}>
+      <p><Badge kind={lbl.badge}>{lbl.text}</Badge></p>
+      <p className="muted mono">{dest}</p>
+      <div className="row fac-actions" style={{ gap: 8, flexWrap: "wrap" }}>
+        {!installed && <button className="primary" disabled={!enabled || busy} onClick={() => onApply("install")}>{btnText("install", "설치")}</button>}
+        {installed && synced && <span className="fac-latest" title="이미 정본과 동기됨">최신 ✓</span>}
+        {installed && !synced && <button disabled={!enabled || busy} onClick={() => onApply("update")}>{btnText("update", "업데이트(재동기)")}</button>}
+        {installed && <button className="danger" disabled={!enabled || busy} onClick={() => onApply("remove")}>{btnText("remove", "제거")}</button>}
+      </div>
+    </Card>
+  );
+}
+
+// #/build 상단 상주 카드(모드 스위치 아님). 미설치=강조·펼침 / 설치·최신=얇은 스트립.
+//   build 는 factory 설치와 무관하게 동작 — 이 카드는 안내·유지관리일 뿐 build 를 막지 않는다.
+export function FactoryPanel() {
+  const st = useApi<FactoryStatus>("/api/factory/status");
+  const [pending, setPending] = useState<{ target: FactoryTarget; action: FactoryAction } | null>(null);
+  const [toggling, setToggling] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [open, setOpen] = useState(false); // 관리 상세 펼침(설치돼 있으면 기본 접힘)
+  // useApi 는 reload 시 data 를 null 로 비운다 → 마지막 상태를 캐시해 재조회 중 카드/메시지 소멸 방지.
+  const [cached, setCached] = useState<FactoryStatus | null>(null);
+  useEffect(() => { if (st.data) setCached(st.data); }, [st.data]);
+  // 재조회(st.loading) 중에도 버튼 잠금 유지 → 성공 후 stale 버튼 재클릭 경쟁 차단.
+  const busy = pending !== null || toggling || st.loading;
+
+  const toggleMaint = async (enabled: boolean) => {
+    if (busy) return; // 쓰기 진행 중 게이트 변경 금지
+    setToggling(true); setMsg(null);
+    try { await setFactoryMaintenance(enabled); st.reload(); }
+    catch (e) { setMsg({ ok: false, text: "유지관리 토글 실패: " + readErrorText(e) }); } finally { setToggling(false); }
+  };
+  const apply = async (target: FactoryTarget, action: FactoryAction) => {
+    const label = target === "claude-skill" ? "Claude 글로벌 스킬" : "Codex 글로벌 스킬";
+    const verb = action === "install" ? "설치" : action === "update" ? "업데이트" : "제거";
+    if (action === "remove" && !window.confirm(`${label} 을(를) 제거할까요?\n(실물 디렉토리는 하드삭제 없이 백업 후 이동됩니다.)`)) return;
+    setOpen(true); // 결과를 계속 보이도록 상세 유지(설치 성공→installed 로 자동 접힘 방지)
+    setPending({ target, action }); setMsg(null);
+    try {
+      const r = await applyFactory(target, action, action === "remove" ? true : undefined);
+      // 낙관적 캐시 패치(codex R2): 재조회 전/실패해도 배지가 결과와 즉시 일치(제거 후 '설치됨' 모순 방지).
+      const key = target === "claude-skill" ? "claudeSkill" : "codexSkill";
+      setCached((prev) => (prev ? { ...prev, targets: { ...prev.targets, [key]: r.state } } : prev));
+      setMsg({ ok: true, text: `${label} ${verb} 완료 · ${methodText(r.method)}${r.backup ? ` (기존은 백업됨)` : ""}` });
+      st.reload();
+    } catch (e) {
+      setMsg({ ok: false, text: `${label} ${verb} 실패: ${readErrorText(e)}` });
+    } finally { setPending(null); }
+  };
+  const pendingFor = (target: FactoryTarget): FactoryAction | null =>
+    pending && pending.target === target ? pending.action : null;
+
+  const s = st.data ?? cached; // 재조회 중엔 캐시로 유지
+  if (!s) { // 최초 로딩 or 에러(캐시 없음)
+    if (st.err) return (
+      <section className="fac-strip"><div className="fac-strip-head">
+        <Badge kind="warn">팩토리 상태 조회 실패</Badge><span className="muted">{st.err}</span>
+      </div></section>
+    );
+    return null; // 로딩 중 — 조용히
+  }
+  if (!s.isFactoryRepo) return null; // 비팩토리 레포 → 숨김(build 는 계속 동작)
+
+  // 설치 여부(어떤 방식이든) + 주의 필요(미설치·마켓 구버전·비동기 복사본).
+  const installed = s.targets.marketplace.installed || s.targets.claudeSkill.kind !== "absent" || s.targets.codexSkill.kind !== "absent";
+  const attention = !installed || s.targets.marketplace.updateAvailable
+    || (s.targets.claudeSkill.kind !== "absent" && !skillSynced(s.targets.claudeSkill))
+    || (s.targets.codexSkill.kind !== "absent" && !skillSynced(s.targets.codexSkill));
+  const expanded = open || !installed; // 미설치면 강제 펼침(온보딩 강조)
+  const summary = !installed ? "팩토리(myharness) 미설치" : attention ? "팩토리 점검 필요" : "팩토리 최신 ✓";
+  const summaryKind: "ok" | "warn" = !installed || attention ? "warn" : "ok";
+  const toggleLabel = expanded ? "접기" : attention ? "업데이트 · 관리" : "관리";
+
+  return (
+    <section className={"fac-strip" + (expanded ? " open" : "")}>
+      <div className="fac-strip-head">
+        <Badge kind={summaryKind}>{summary}</Badge>
+        <span className="muted">정본 myharness {s.sourceVersion ?? "?"}</span>
+        {st.err && <span className="fac-stale" title={st.err}>· 상태 재조회 실패(캐시 표시)</span>}
+        <span className="grow" />
+        <button className="fac-toggle" onClick={() => setOpen((o) => !o)} disabled={!installed}
+          aria-expanded={expanded} aria-controls="fac-detail">{toggleLabel}</button>
+      </div>
+      {expanded && <div className="fac-detail" id="fac-detail">
+        {!installed && <p className="fac-lead">이 하네스를 찍어내는 <b>팩토리(myharness)</b>를 설치하면 Claude Code/Codex에서 하네스를 직접 만들 수 있습니다. (웹 자동 빌드는 설치 없이도 동작합니다.)</p>}
+        {msg && <p className={msg.ok ? "fac-msg ok" : "fac-msg err"} role={msg.ok ? "status" : "alert"}>{msg.text}</p>}
+        <Card title="유지관리 게이트">
+          <p className="muted">설치·업데이트·제거는 HOME(<span className="mono">~/.claude</span>·<span className="mono">~/.codex</span>)에 스킬 파일을 씁니다. 안전을 위해 기본 잠금.</p>
+          <label className={"fac-gate" + (s.maintenanceEnabled ? "" : " locked")} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="checkbox" checked={s.maintenanceEnabled} disabled={busy} onChange={(e) => toggleMaint(e.target.checked)} />
+            <span>{s.maintenanceEnabled ? "유지관리 허용됨 — 아래 버튼 사용 가능" : "🔒 잠김 — 설치·업데이트하려면 여기를 켜세요"}</span>
+          </label>
+        </Card>
+        <FactoryTargetCard title="Claude Code · 글로벌 스킬" dest="~/.claude/skills/myharness"
+          state={s.targets.claudeSkill} enabled={s.maintenanceEnabled} busy={busy}
+          pendingAction={pendingFor("claude-skill")} onApply={(a) => apply("claude-skill", a)} />
+        <FactoryTargetCard title="Codex · 글로벌 스킬" dest="~/.codex/skills/myharness"
+          state={s.targets.codexSkill} enabled={s.maintenanceEnabled} busy={busy}
+          pendingAction={pendingFor("codex-skill")} onApply={(a) => apply("codex-skill", a)} />
+        <Card title="Claude Code · marketplace 플러그인">
+          {s.targets.marketplace.installed ? <>
+            <p><Badge kind={s.targets.marketplace.updateAvailable ? "warn" : "ok"}>
+              {s.targets.marketplace.updateAvailable ? `업데이트 가능 (${s.targets.marketplace.version} → ${s.sourceVersion})` : `설치됨 (${s.targets.marketplace.version})`}
+            </Badge></p>
+            <p className="muted">marketplace 플러그인은 앱이 직접 갱신할 수 없습니다. Claude Code 에서 실행:</p>
+            <p className="fac-cmd"><span className="mono">/plugin update myharness</span><CopyBtn text="/plugin update myharness" /></p>
+          </> : <p className="muted">marketplace 플러그인 미설치(감지 안 됨). 필요하면 Claude Code <code>/plugin install</code>, 또는 위 글로벌 스킬로 설치.</p>}
+        </Card>
+        <p className="muted">참고: marketplace 플러그인과 글로벌 스킬을 <b>동시에</b> 두면 같은 이름 스킬이 중복될 수 있습니다. 하나를 선택하세요.</p>
+      </div>}
+    </section>
   );
 }
 

@@ -396,3 +396,40 @@ details.tier-b[open] > summary { margin-bottom:8px; }
   .navgroup .glabel { flex-basis:100%; }
   .form { grid-template-columns:1fr; }
 }
+
+/* F11 Factory 유지관리 — 스코프 버튼/레이아웃 */
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; }
+.fac-actions { display:flex; }
+.fac-actions button { background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 14px; font-weight:600; cursor:pointer; }
+.fac-actions button:hover:not(:disabled) { border-color:var(--accent); }
+.fac-actions button:disabled { opacity:.5; cursor:not-allowed; }
+.fac-actions button.primary { background:var(--accent); color:var(--on-accent); border:none; }
+.fac-actions button.danger { color:var(--err); border-color:var(--err); }
+.fac-actions button.danger:hover:not(:disabled) { border-color:var(--err); background:var(--err-wash); }
+.fac-msg { margin-top:8px; font-size:13px; color:var(--fg-2); }
+
+/* F11 FactoryPanel — #/build 상단 접이식 스트립 */
+.fac-strip { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin:4px 0 18px; background:var(--panel); }
+.fac-strip.open { background:transparent; }
+.fac-strip-head { display:flex; align-items:center; gap:10px; font-size:13px; }
+.fac-strip-head .grow { flex:1; }
+.fac-toggle { background:transparent; color:var(--fg-2); border:1px solid var(--line); border-radius:8px; padding:5px 12px; font-size:12.5px; font-weight:600; cursor:pointer; }
+.fac-toggle:hover:not(:disabled) { border-color:var(--accent); color:var(--fg); }
+.fac-toggle:disabled { opacity:.5; cursor:default; }
+.fac-detail { margin-top:12px; display:flex; flex-direction:column; gap:12px; }
+
+/* F11 FactoryPanel — UX 개선(진행표시·성패색·게이트 강조·복사) */
+.fac-lead { font-size:13px; color:var(--fg-2); background:var(--accent-wash); border:1px solid var(--accent); border-radius:9px; padding:10px 12px; margin:0 0 4px; }
+.fac-msg.ok { color:var(--ok); }
+.fac-msg.err { color:var(--err); }
+.fac-gate.locked { color:var(--warn); font-weight:600; }
+.fac-cmd { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.fac-copy { background:transparent; color:var(--fg-2); border:1px solid var(--line); border-radius:7px; padding:3px 10px; font-size:12px; font-weight:600; cursor:pointer; }
+.fac-copy:hover { border-color:var(--accent); color:var(--fg); }
+
+/* F11 UX R1 — 결과 배너·최신 배지 */
+.fac-msg { margin:0; padding:9px 12px; border-radius:9px; border:1px solid var(--line); font-size:13px; }
+.fac-msg.ok { color:var(--ok); background:var(--ok-wash); border-color:var(--ok); }
+.fac-msg.err { color:var(--err); background:var(--err-wash); border-color:var(--err); }
+.fac-latest { display:inline-flex; align-items:center; font-size:12.5px; font-weight:600; color:var(--ok); background:var(--ok-wash); border:1px solid var(--ok); border-radius:8px; padding:6px 12px; }
+.fac-stale { font-size:12px; color:var(--warn); font-weight:600; }

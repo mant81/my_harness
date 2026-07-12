@@ -67,6 +67,7 @@ export function buildServer(opts: {
   security?: SecurityState; projectRoot?: string;
   buildExec?: import("./lib/builddraft.js").ExecFn; // F10(M15): 빌드 초안 exec 경계 주입(테스트 mock).
   distRoot?: string; // 단일 오리진 정적 서빙 루트(기본 DIST_ROOT·테스트는 임시 dist 주입).
+  home?: string; // F11: 팩토리 유지관리 HOME 경계 주입(기본 homedir()·테스트는 임시 dir).
 } = {}) {
   // 보안 불변식: caseSensitive(기본 true)·단일 %-디코딩(find-my-way 기본)에 의존한다.
   //   토큰 게이트(security.ts)는 `new URL`+decodeURIComponent 로 라우터보다 강하게 정규화하므로
@@ -74,7 +75,7 @@ export function buildServer(opts: {
   //   caseSensitive:false / lenient 옵션을 켜면 이 불변식이 깨진다 — 켜지 말 것(회귀 테스트: staticserve.test.ts ⑦).
   const app = Fastify({ logger: false, routerOptions: { caseSensitive: true } });
   if (opts.security) registerSecurity(app, opts.security);
-  registerApi(app, opts.projectRoot ?? projectRoot, { buildExec: opts.buildExec });
+  registerApi(app, opts.projectRoot ?? projectRoot, { buildExec: opts.buildExec, home: opts.home });
   registerStatic(app, opts.distRoot ?? DIST_ROOT); // SPA 셸 정적 서빙(notFoundHandler·경화 리더 confine)
   return app;
 }

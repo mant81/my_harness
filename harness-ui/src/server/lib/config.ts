@@ -22,6 +22,7 @@ export interface Config_v06 {
   evals: Record<string, unknown> | null; // F8 서브객체(M11 은 골격만·형제 보존 계약 확립).
   docsSources: DocsSource[];         // F9(M14·additive): 표시 소스 목록. 기본 [{Docs,docs}]·경로안전은 write/serve 시점 검증.
   docsMenuEnabled: boolean;          // F9(M14·additive): Docs 메뉴 on/off. 기본 true.
+  factoryMaintenanceEnabled: boolean; // F11(팩토리 유지관리 게이트·불변 기본 false·fail-closed): HOME 스킬 설치/업데이트/제거 쓰기 허용.
   [k: string]: unknown;              // root passthrough(미지/미래 필드 보존).
 }
 
@@ -86,6 +87,9 @@ export function loadConfig(raw: unknown): Config_v06 {
     docsMenuEnabled: z.boolean().safeParse(obj.docsMenuEnabled).success
       ? (obj.docsMenuEnabled as boolean)
       : true, // 손상/부재 → 기본 true(형제 무영향)
+    factoryMaintenanceEnabled: z.boolean().safeParse(obj.factoryMaintenanceEnabled).success
+      ? (obj.factoryMaintenanceEnabled as boolean)
+      : false, // fail-closed(HOME 쓰기 게이트)
   };
 }
 
@@ -163,7 +167,7 @@ export function withConfigLock<T>(fn: () => Promise<T>): Promise<T> {
 
 // RMW 대상 = mutable 필드만. projectsHome 는 patch 타입에서 원천 배제(env SSOT·read-only).
 export type ConfigPatch = Partial<
-  Pick<Config_v06, "projectRoot" | "definitionEditEnabled" | "evals" | "docsSources" | "docsMenuEnabled">
+  Pick<Config_v06, "projectRoot" | "definitionEditEnabled" | "evals" | "docsSources" | "docsMenuEnabled" | "factoryMaintenanceEnabled">
 >;
 
 // 원자 read-modify-validate-write: 뮤텍스 하 **단일** strict read → loadConfig(전 필드 복구) →
@@ -185,6 +189,7 @@ export async function updateConfig(patch: ConfigPatch): Promise<Config_v06> {
     // F9: docsSources 는 []([빈] = 전 소스 삭제한 정상 상태)를 default 로 덮지 않음(nullish 만 default).
     if ("docsSources" in patch) next.docsSources = patch.docsSources ?? cloneDefaultDocsSources();
     if ("docsMenuEnabled" in patch) next.docsMenuEnabled = patch.docsMenuEnabled ?? true;
+    if ("factoryMaintenanceEnabled" in patch) next.factoryMaintenanceEnabled = patch.factoryMaintenanceEnabled ?? false;
     // S-A2 불변 assert: patch 경로가 projectsHome 을 바꾸지 않았음(타입상 불가하나 이중 방어).
     if (next.projectsHome !== before.projectsHome) throw new Error("projectsHome-mutation-blocked");
     await writeJsonAtomic(configPath(), next); // atomic.ts 재사용

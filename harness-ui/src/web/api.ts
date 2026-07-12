@@ -486,6 +486,32 @@ export async function postHarnessDraft(body: { domain: string }): Promise<Harnes
   return r.json() as Promise<HarnessDraftResult>;
 }
 
+// F11: 팩토리(myharness) 유지관리 — 상태 조회 + 설치/업데이트/제거 + 게이트 토글.
+export type SkillState =
+  | { kind: "absent" }
+  | { kind: "symlink"; points: string; synced: boolean }
+  | { kind: "copy" }
+  | { kind: "foreign" };
+export interface FactoryStatus {
+  isFactoryRepo: boolean;
+  sourceVersion: string | null;
+  maintenanceEnabled: boolean;
+  targets: {
+    claudeSkill: SkillState;
+    codexSkill: SkillState;
+    marketplace: { installed: boolean; version: string | null; updateAvailable: boolean };
+  };
+}
+export type FactoryTarget = "claude-skill" | "codex-skill";
+export type FactoryAction = "install" | "update" | "remove";
+export const setFactoryMaintenance = (enabled: boolean) =>
+  apiPost<{ ok: true; factoryMaintenanceEnabled: boolean }>("/api/settings/factory-maintenance", { enabled });
+export const applyFactory = (target: FactoryTarget, action: FactoryAction, confirm?: boolean) =>
+  apiPost<{ ok: true; method: string; backup?: string; state: SkillState }>(
+    "/api/factory/apply",
+    confirm === undefined ? { target, action } : { target, action, confirm },
+  );
+
 // ── A94 전역 재연결 — 연결 프로브(healthz 비인증 + 경량 인증 GET) ──
 // healthz(/api/ 밖·session-token 무관)로 liveness → up 이면 인증 GET(/api/settings)으로 토큰/bootstrap 확립 확인.
 // 반환은 connection.nextConn 이 소비하는 Probe. 개별 통신 에러를 여기서 흡수(오버레이가 전역 처리·토스트 폭주 금지).

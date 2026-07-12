@@ -13,6 +13,8 @@ import { detectDrift, syncPlan } from "../adapters/drift.js";
 import { stateStats, settings } from "../adapters/statestats.js";
 import { computeHarnessScorecard } from "../adapters/scorecard.js";
 import { writeHarnessScorecardSnapshot, readHarnessTrend } from "../adapters/scorecard-snapshot.js";
+import { homedir } from "node:os";
+import { factoryStatus, applyFactoryAction } from "../adapters/factory.js";
 import { appendConfigChange, readConfigChanges } from "../adapters/confighistory.js";
 import { listHarnesses } from "../adapters/harnesslist.js";
 import { docsTree } from "../adapters/docs.js";
@@ -66,10 +68,11 @@ async function countActiveRuns(projectRoot: string): Promise<number> {
 }
 
 export function registerApi(
-  app: FastifyInstance, projectRoot: string, opts: { buildExec?: ExecFn } = {},
+  app: FastifyInstance, projectRoot: string, opts: { buildExec?: ExecFn; home?: string } = {},
 ): void {
   // F10(M15) 빌드 초안 exec 경계(주입 가능·테스트는 mock·실 LLM 미호출). 기본 = safeExec(execFile+argv·shell 금지).
   const buildExec: ExecFn = opts.buildExec ?? ((cmd, args, eopts) => safeExec(cmd, args, eopts));
+  const home: string = opts.home ?? homedir(); // F11 팩토리 유지관리 HOME(주입 가능·테스트는 임시 dir).
   // HB8 백프레셔 게이트(registerApi 인스턴스별 — draft·create 공통 in-flight 뮤텍스 + draft 쿨다운).
   const buildGate = new BuildGate();
 
@@ -363,6 +366,43 @@ export function registerApi(
     if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
     const next = await updateConfig({ definitionEditEnabled: parsed.data.enabled }); // projectRoot/projectsHome/evals 보존
     return { ok: true, definitionEditEnabled: next.definitionEditEnabled };
+  });
+
+  // F11: 팩토리(myharness) 유지관리 — 웹에서 설치·업데이트·제거 명확화.
+  //   상태 조회는 무게이트(읽기). 쓰기(apply)는 factoryMaintenanceEnabled 게이트 + confirm(제거).
+  app.get("/api/factory/status", async () => {
+    const cfg = await loadConfigFromDisk();
+    return factoryStatus({ projectRoot, home, maintenanceEnabled: cfg.factoryMaintenanceEnabled === true });
+  });
+  const FactoryMaintBody = z.object({ enabled: z.boolean() }).strict();
+  app.post("/api/settings/factory-maintenance", async (req, reply) => {
+    const parsed = FactoryMaintBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const next = await updateConfig({ factoryMaintenanceEnabled: parsed.data.enabled }); // 타 필드 보존
+    return { ok: true, factoryMaintenanceEnabled: next.factoryMaintenanceEnabled };
+  });
+  const FactoryApplyBody = z.object({
+    target: z.enum(["claude-skill", "codex-skill"]),
+    action: z.enum(["install", "update", "remove"]),
+    confirm: z.boolean().optional(),
+  }).strict();
+  app.post("/api/factory/apply", async (req, reply) => {
+    const parsed = FactoryApplyBody.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: "bad-input", detail: parsed.error.issues });
+    const cfg = await loadConfigFromDisk();
+    if (cfg.factoryMaintenanceEnabled !== true) return reply.code(403).send({ error: "maintenance-disabled" }); // fail-closed 게이트
+    try {
+      const r = await applyFactoryAction({
+        projectRoot, home, target: parsed.data.target, action: parsed.data.action,
+        confirm: parsed.data.confirm, nowMs: Date.now(),
+      });
+      return r;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 예상 사유는 409(계약 위반)·그 외 500.
+      const known = ["confirm-required", "source-not-factory", "unknown-target", "parent-unsafe"];
+      return reply.code(known.includes(msg) ? 409 : 500).send({ error: msg });
+    }
   });
 
   // 무인자(raw 쿼리 부재) → 기존 listRuns({runs} 계약 불변). 인자 → RunsQuery 검증 후 queryRuns.
